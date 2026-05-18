@@ -3,7 +3,7 @@ use bevy::ecs::entity::{Entity, EntityHashSet};
 use bevy::ecs::hierarchy::ChildOf;
 use bevy::ecs::message::MessageReader;
 use bevy::ecs::query::{Has, With, Without};
-use bevy::ecs::system::{Commands, Query, Res, Single};
+use bevy::ecs::system::{Commands, Query, Res, ResMut, Single};
 use bevy::math::IRect;
 use tracing::{Level, instrument};
 use tracing::{debug, info};
@@ -610,6 +610,7 @@ fn manage_window(
     mut messages: MessageReader<Event>,
     windows: Windows,
     apps: Query<&Application>,
+    mut config: ResMut<Config>,
     mut commands: Commands,
 ) {
     if filter_window_operations(&mut messages, |op| matches!(op, Operation::Manage))
@@ -641,8 +642,14 @@ fn manage_window(
         && let Some(bundle_id) = app.bundle_id()
     {
         let floating = unmanaged.is_none();
-        _ = persist_window_floating_rule(CONFIGURATION_FILE.as_path(), bundle_id, floating)
-            .inspect_err(|err| debug!("persisting floating rule for {bundle_id}: {err}"));
+        if persist_window_floating_rule(CONFIGURATION_FILE.as_path(), bundle_id, floating)
+            .inspect_err(|err| debug!("persisting floating rule for {bundle_id}: {err}"))
+            .is_ok()
+        {
+            _ = config
+                .reload_config(CONFIGURATION_FILE.as_path())
+                .inspect_err(|err| debug!("reloading config after managing {bundle_id}: {err}"));
+        }
     }
 }
 

@@ -32,7 +32,7 @@ use crate::ecs::{
 };
 use crate::events::Event;
 use crate::manager::{
-    Application, Display, Process, Window, WindowManager, WindowOS, bruteforce_windows,
+    Application, Display, Origin, Process, Window, WindowManager, WindowOS, bruteforce_windows,
 };
 use crate::overlay::{FlashMessageManager, OverlayManager};
 use crate::platform::PlatformCallbacks;
@@ -945,17 +945,82 @@ pub(super) fn commit_window_size(
 #[allow(clippy::needless_pass_by_value)]
 pub(super) fn cleanup_on_exit(
     mut exit_events: MessageReader<AppExit>,
-    windows: Windows,
+    mut windows: Query<&mut Window>,
+    displays: Query<&Display>,
     window_manager: Res<WindowManager>,
 ) {
     for _ in exit_events.read() {
         info!("Cleaning up before exit");
-        let ids = windows
-            .iter()
-            .map(|(window, _)| window.id())
-            .collect::<Vec<_>>();
+        let display_bounds = displays.iter().map(Display::bounds).collect::<Vec<_>>();
+        let mut ids = Vec::new();
+
+        for mut window in &mut windows {
+            ids.push(window.id());
+            if window.is_full_screen() {
+                continue;
+            }
+
+            let frame = window.frame();
+            if let Some(origin) = clamped_window_origin(frame, &display_bounds)
+                && origin != frame.min
+            {
+                debug!(
+                    "Moving window {} back onscreen on exit: {:?} -> {:?}",
+                    window.id(),
+                    frame.min,
+                    origin
+                );
+                window.reposition(origin);
+            }
+        }
+
         window_manager.dim_windows(&ids, 0.0);
     }
+}
+
+fn clamped_window_origin(frame: IRect, display_bounds: &[IRect]) -> Option<Origin> {
+    if display_bounds.is_empty()
+        || display_bounds
+            .iter()
+            .any(|bounds| contains_frame(*bounds, frame))
+    {
+        return None;
+    }
+
+    let target = display_bounds
+        .iter()
+        .min_by_key(|bounds| distance_to_display(frame.center(), **bounds))?;
+    Some(clamp_frame_to_bounds(frame, *target))
+}
+
+fn contains_frame(bounds: IRect, frame: IRect) -> bool {
+    bounds.min.x <= frame.min.x
+        && bounds.min.y <= frame.min.y
+        && bounds.max.x >= frame.max.x
+        && bounds.max.y >= frame.max.y
+}
+
+fn distance_to_display(point: Origin, bounds: IRect) -> i64 {
+    let closest_x = point.x.clamp(bounds.min.x, bounds.max.x);
+    let closest_y = point.y.clamp(bounds.min.y, bounds.max.y);
+    let dx = i64::from(point.x - closest_x);
+    let dy = i64::from(point.y - closest_y);
+    dx * dx + dy * dy
+}
+
+fn clamp_frame_to_bounds(frame: IRect, bounds: IRect) -> Origin {
+    let size = frame.size();
+    let x = if size.x >= bounds.width() {
+        bounds.min.x
+    } else {
+        frame.min.x.clamp(bounds.min.x, bounds.max.x - size.x)
+    };
+    let y = if size.y >= bounds.height() {
+        bounds.min.y
+    } else {
+        frame.min.y.clamp(bounds.min.y, bounds.max.y - size.y)
+    };
+    Origin::new(x, y)
 }
 
 #[allow(clippy::needless_pass_by_value)]
@@ -995,4 +1060,62 @@ pub(crate) fn update_low_power_state(low_power_mode: Option<ResMut<LowPowerMode>
     };
     let process_info = objc2_foundation::NSProcessInfo::processInfo();
     state.0 = process_info.isLowPowerModeEnabled();
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn clamped_window_origin_returns_none_for_visible_window() {
+        let display = IRect::new(0, 24, 1440, 900);
+        let frame = IRect::new(100, 100, 500, 400);
+
+        assert_eq!(clamped_window_origin(frame, &[display]), None);
+    }
+
+    #[test]
+    fn clamped_window_origin_moves_window_back_from_right_edge() {
+        let display = IRect::new(0, 24, 1440, 900);
+        let frame = IRect::new(1435, 100, 1835, 400);
+
+        assert_eq!(
+            clamped_window_origin(frame, &[display]),
+            Some(Origin::new(1040, 100))
+        );
+    }
+
+    #[test]
+    fn clamped_window_origin_moves_window_back_from_left_and_top_edges() {
+        let display = IRect::new(0, 24, 1440, 900);
+        let frame = IRect::new(-300, -200, 100, 100);
+
+        assert_eq!(
+            clamped_window_origin(frame, &[display]),
+            Some(Origin::new(0, 24))
+        );
+    }
+
+    #[test]
+    fn clamped_window_origin_uses_nearest_display() {
+        let left = IRect::new(-1280, 24, 0, 800);
+        let right = IRect::new(0, 24, 1440, 900);
+        let frame = IRect::new(-1500, 100, -1100, 400);
+
+        assert_eq!(
+            clamped_window_origin(frame, &[left, right]),
+            Some(Origin::new(-1280, 100))
+        );
+    }
+
+    #[test]
+    fn clamped_window_origin_handles_window_larger_than_display() {
+        let display = IRect::new(0, 24, 1440, 900);
+        let frame = IRect::new(200, 100, 2200, 1200);
+
+        assert_eq!(
+            clamped_window_origin(frame, &[display]),
+            Some(Origin::new(0, 24))
+        );
+    }
 }
