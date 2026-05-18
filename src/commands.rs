@@ -12,7 +12,7 @@ mod query;
 
 use crate::config::{CONFIGURATION_FILE, Config, persist_window_floating_rule};
 use crate::ecs::layout::{Column, LayoutStrip, StackItem};
-use crate::ecs::params::{ActiveDisplay, ActiveDisplayMut, Windows};
+use crate::ecs::params::{ActiveDisplay, ActiveDisplayMut, GlobalState, Windows};
 use crate::ecs::{
     ActiveDisplayMarker, ActiveWorkspaceMarker, Bounds, FocusedMarker, FullWidthMarker,
     NativeFullscreenMarker, SelectedVirtualMarker, SendMessageTrigger, Unmanaged, focus_entity,
@@ -222,6 +222,7 @@ fn command_move_focus(
     windows: Windows,
     workspaces: Query<(&LayoutStrip, Option<&NativeFullscreenMarker>)>,
     active_display: ActiveDisplay,
+    mut global_state: GlobalState,
     mut commands: Commands,
 ) {
     let Some(Operation::Focus(direction)) =
@@ -241,6 +242,10 @@ fn command_move_focus(
             .and_then(|strip| strip.last().ok().and_then(|col| col.top()))
     {
         debug!("fullscreen: swap raising {entity}");
+        if let Some(window) = windows.get(entity) {
+            global_state.set_ffm_flag(Some(window.id()));
+        }
+        global_state.set_skip_reshuffle(true);
         focus_entity(entity, true, &mut commands);
         return;
     }
@@ -266,6 +271,10 @@ fn command_move_focus(
         });
 
     if let Some(entity) = candidate {
+        if let Some(window) = windows.get(entity) {
+            global_state.set_ffm_flag(Some(window.id()));
+        }
+        global_state.set_skip_reshuffle(true);
         focus_entity(entity, true, &mut commands);
         // Explicitly reshuffle so the target window is brought into view.
         // This avoids a race where focus-follows-mouse leaves skip_reshuffle

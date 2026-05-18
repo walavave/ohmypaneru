@@ -24,6 +24,7 @@ use crate::events::Event;
 use crate::manager::{Application, Display, Window, WindowManager};
 
 const REFRESH_WINDOW_CHECK_FREQ_MS: u64 = 1000;
+const MOUSE_FOLLOWS_FOCUS_MIN_VISIBLE_RATIO: f32 = 0.8;
 pub struct FocusEventsPlugin;
 
 impl Plugin for FocusEventsPlugin {
@@ -155,6 +156,18 @@ fn mouse_follows_focus(
             .map(Display::bounds)
     {
         let visible = display_bounds.intersect(frame);
+        let frame_area = frame.width().max(0) * frame.height().max(0);
+        let visible_area = visible.width().max(0) * visible.height().max(0);
+        let visible_ratio = if frame_area > 0 {
+            visible_area as f32 / frame_area as f32
+        } else {
+            0.0
+        };
+
+        if visible_ratio >= MOUSE_FOLLOWS_FOCUS_MIN_VISIBLE_RATIO {
+            return;
+        }
+
         let origin = visible.center();
         debug!("centering on {} {origin}", window.id());
         window_manager.warp_mouse(origin);

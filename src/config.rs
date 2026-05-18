@@ -1861,6 +1861,7 @@ fn test_config_defaults() {
     assert_eq!(config.border_width(), 2.0);
     assert_eq!(config.border_radius(), BorderRadiusOption::Auto);
     assert_eq!(config.menubar_height(), None);
+    assert!(config.mouse_follows_focus());
 }
 
 #[test]
