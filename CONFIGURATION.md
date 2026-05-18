@@ -115,7 +115,7 @@ Format: `"[modifiers-]key"`. Available modifiers are:
 | `window_grow` | Alias for `window_resize`. |
 | `window_shrink` | Cycle through preset widths (Shrink). |
 | `window_fullwidth` | Toggle full-width mode. |
-| `window_manage` | Toggle between tiled and floating state. |
+| `window_manage` | Toggle between tiled and floating state. The selected state is written back as a `[windows]` rule for the focused app. |
 | `window_stack` | Stack the current window into the column on the left. |
 | `window_unstack` | Pull a window out of a stack into its own column. |
 | `window_equalize` | Make all windows in a stack equal height. |

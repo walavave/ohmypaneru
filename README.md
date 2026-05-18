@@ -151,6 +151,7 @@ window_focus_west = "cmd - h"
 window_focus_east = "cmd - l"
 window_resize = "alt - r"
 window_center = "alt - c"
+window_manage = "ctrl + alt - t"
 quit = "ctrl + alt - q"
 ```
 
@@ -173,6 +174,18 @@ $ paneru start
 $ paneru
 ```
 
+### Development workflow
+
+When iterating locally, run Paneru in the foreground instead of reinstalling the
+LaunchAgent after every code change:
+
+```shell
+$ cargo run -- launch
+```
+
+Use `paneru install` when you want to update the background service plist, and
+`paneru restart` after installing a new binary with `cargo install --path .`.
+
 ### Sending Commands
 
 Paneru exposes a `send-cmd` subcommand that lets you control the running
@@ -194,7 +207,7 @@ $ paneru send-cmd <command> [args...]
 | `window grow`              | Grow to the next preset width                    |
 | `window shrink`            | Shrink to the previous preset width              |
 | `window fullwidth`         | Toggle full-width mode for the focused window    |
-| `window manage`            | Toggle managed/floating state                    |
+| `window manage`            | Toggle managed/floating state and persist it for that app |
 | `window equalize`          | Distribute equal heights in the focused stack    |
 | `window stack`             | Stack the focused window onto its left neighbour |
 | `window unstack`           | Unstack the focused window into its own column   |

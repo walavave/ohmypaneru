@@ -10,7 +10,7 @@ use tracing::{debug, info};
 
 mod query;
 
-use crate::config::Config;
+use crate::config::{CONFIGURATION_FILE, Config, persist_window_floating_rule};
 use crate::ecs::layout::{Column, LayoutStrip, StackItem};
 use crate::ecs::params::{ActiveDisplay, ActiveDisplayMut, Windows};
 use crate::ecs::{
@@ -606,7 +606,12 @@ fn full_width_window(
 /// * `windows` - A mutable query for `Window` components, their `Entity`, and whether they have the `Unmanaged` marker.
 /// * `commands` - Bevy commands to modify entities.
 #[allow(clippy::needless_pass_by_value)]
-fn manage_window(mut messages: MessageReader<Event>, windows: Windows, mut commands: Commands) {
+fn manage_window(
+    mut messages: MessageReader<Event>,
+    windows: Windows,
+    apps: Query<&Application>,
+    mut commands: Commands,
+) {
     if filter_window_operations(&mut messages, |op| matches!(op, Operation::Manage))
         .next()
         .is_none()
@@ -629,6 +634,15 @@ fn manage_window(mut messages: MessageReader<Event>, windows: Windows, mut comma
         commands.entity(entity).try_remove::<Unmanaged>();
     } else {
         commands.entity(entity).try_insert(Unmanaged::Floating);
+    }
+
+    if let Some((_, _, parent)) = windows.find_parent(window.id())
+        && let Ok(app) = apps.get(parent)
+        && let Some(bundle_id) = app.bundle_id()
+    {
+        let floating = unmanaged.is_none();
+        _ = persist_window_floating_rule(CONFIGURATION_FILE.as_path(), bundle_id, floating)
+            .inspect_err(|err| debug!("persisting floating rule for {bundle_id}: {err}"));
     }
 }
 

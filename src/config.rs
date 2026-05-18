@@ -7,12 +7,13 @@ use std::{
     collections::HashMap,
     env,
     ffi::c_void,
-    fs::read_to_string,
+    fs::{read_to_string, write},
     path::{Path, PathBuf},
     ptr::NonNull,
     sync::{Arc, LazyLock},
 };
 use stdext::function_name;
+use toml_edit::{DocumentMut, Item, Table, value};
 use tracing::{error, info, warn};
 
 use self::decorations::BorderRadiusOption;
@@ -114,6 +115,63 @@ pub fn deprecated_options_in_input(input: &str) -> Result<Vec<String>> {
 pub fn deprecated_options_in_file(path: &Path) -> Result<Vec<String>> {
     let input = read_to_string(path)?;
     deprecated_options_in_input(&input)
+}
+
+pub fn persist_window_floating_rule(path: &Path, bundle_id: &str, floating: bool) -> Result<()> {
+    let input = read_to_string(path)?;
+    let mut document = input.parse::<DocumentMut>()?;
+    let rule_name = format!("paneru_auto_{}", sanitize_rule_name(bundle_id));
+
+    if !document.as_table().contains_key("windows") || !document["windows"].is_table() {
+        document
+            .as_table_mut()
+            .insert("windows", Item::Table(Table::new()));
+    }
+
+    let windows = document["windows"].as_table_mut().ok_or_else(|| {
+        Error::InvalidConfig("[windows] must be a table to persist floating rules".to_string())
+    })?;
+
+    let matching_rule = windows.iter().find_map(|(name, item)| {
+        let table = item.as_table()?;
+        let current_bundle = table.get("bundle_id")?.as_str()?;
+        let title = table.get("title")?.as_str()?;
+        (current_bundle == bundle_id && title == ".*").then(|| name.to_string())
+    });
+    let rule_name = matching_rule.as_deref().unwrap_or(&rule_name);
+
+    if !windows.contains_key(rule_name) {
+        windows[rule_name] = Item::Table(Table::new());
+    }
+
+    let rule = windows[rule_name]
+        .as_table_mut()
+        .ok_or_else(|| Error::InvalidConfig(format!("[windows.{rule_name}] must be a table")))?;
+    rule["title"] = value(".*");
+    rule["bundle_id"] = value(bundle_id);
+    rule["floating"] = value(floating);
+
+    write(path, document.to_string())?;
+    Ok(())
+}
+
+fn sanitize_rule_name(input: &str) -> String {
+    let name = input
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '_' || c == '-' {
+                c
+            } else {
+                '_'
+            }
+        })
+        .collect::<String>();
+
+    if name.is_empty() {
+        "window".to_string()
+    } else {
+        name
+    }
 }
 
 /// Parses a string into a `Direction` enum.
@@ -848,7 +906,7 @@ impl InnerConfig {
             for binding in bindings.all_mut() {
                 binding.command = parse_command(&argv)?;
 
-                if let Some(code) = keycode_for_key_name(&binding.key, &virtual_keys) {
+                if let Some(code) = keycode_for_key_name(&binding.key, virtual_keys) {
                     binding.code = code;
                     info!("bind: {binding:?}");
                 } else {
@@ -1592,6 +1650,32 @@ index = 1
     let defaults = Config::default();
     assert_eq!(defaults.swipe_sensitivity(), 0.35);
     assert_eq!(defaults.swipe_deceleration(), 4.0);
+}
+
+#[test]
+fn test_persist_window_floating_rule() {
+    let path = std::env::temp_dir().join(format!("paneru-config-test-{}.toml", std::process::id()));
+    write(
+        &path,
+        r#"
+[bindings]
+window_manage = "ctrl+alt-t"
+"#,
+    )
+    .expect("write config");
+
+    persist_window_floating_rule(&path, "com.example.App", true).expect("persist floating");
+    let input = read_to_string(&path).expect("read config");
+    assert!(input.contains("[windows.paneru_auto_com_example_App]"));
+    assert!(input.contains("title = \".*\""));
+    assert!(input.contains("bundle_id = \"com.example.App\""));
+    assert!(input.contains("floating = true"));
+
+    persist_window_floating_rule(&path, "com.example.App", false).expect("persist tiled");
+    let input = read_to_string(&path).expect("read config");
+    assert!(input.contains("floating = false"));
+
+    _ = std::fs::remove_file(path);
 }
 
 #[test]

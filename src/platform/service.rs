@@ -68,12 +68,11 @@ impl Service {
         self.plist_path().is_file()
     }
 
-    /// Installs the service as a launch agent by writing its plist file.
-    /// If the service is already installed, a warning is logged, and installation is skipped.
+    /// Installs or updates the service as a launch agent by writing its plist file.
     ///
     /// # Returns
     ///
-    /// `Ok(())` if the service is installed successfully or already exists, otherwise `Err(Error)` if a file system error occurs.
+    /// `Ok(())` if the service is installed or updated successfully, otherwise `Err(Error)` if a file system error occurs.
     pub fn install(&self) -> Result<()> {
         let plist_path = self.plist_path();
         let dir = plist_path.parent().ok_or(Error::last_os_error())?;
@@ -81,17 +80,21 @@ impl Service {
             fs::create_dir_all(dir)?;
         }
 
-        if self.is_installed() {
-            warn!(
-                "existing launch agent detected at `{}`, skipping installation",
+        let launchd_plist = self.launchd_plist();
+        if self.is_installed() && fs::read_to_string(plist_path).is_ok_and(|s| s == launchd_plist) {
+            info!(
+                "launch agent already up to date at `{}`",
                 plist_path.display()
             );
             return Ok(());
         }
 
         let mut plist = fs::File::create(plist_path)?;
-        plist.write_all(self.launchd_plist().as_bytes())?;
-        info!("installed launch agent to `{}`", plist_path.display());
+        plist.write_all(launchd_plist.as_bytes())?;
+        info!(
+            "installed or updated launch agent at `{}`",
+            plist_path.display()
+        );
         info!("check logfile /tmp/com.github.karinushka.paneru*.log for potential error messages");
         Ok(())
     }
