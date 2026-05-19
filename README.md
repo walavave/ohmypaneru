@@ -99,11 +99,11 @@ $ cargo install paneru
 $ git clone https://github.com/karinushka/paneru.git
 $ cd paneru
 $ cargo build --release
-$ cargo install --path .
+$ cargo install --path . --locked
 ```
 
 It can run directly from the command line or as a service.
-Note that you will need to grant accessibility privileges to the binary.
+Note that you will need to grant accessibility privileges to Paneru.
 
 ### Installing with Homebrew
 
@@ -119,6 +119,20 @@ Or by first adding the tap and then installing by name:
 $ brew tap karinushka/paneru
 $ brew install paneru
 ```
+
+Homebrew installs the command-line `paneru` binary. For normal background use,
+run `paneru install` and `paneru start` after installation; Paneru will create a
+stable app bundle for the LaunchAgent automatically.
+
+Before uninstalling with Homebrew, stop and remove the Paneru service:
+
+```shell
+$ paneru uninstall
+$ brew uninstall paneru
+```
+
+`paneru uninstall` removes the LaunchAgent, the generated app bundle, and stale
+Paneru entries from macOS' menu bar visibility settings.
 
 ### Installing with Nix
 
@@ -165,11 +179,33 @@ $ paneru install
 $ paneru start
 ```
 
+`paneru install` creates a stable app bundle at `~/Applications/Paneru.app` and
+points the LaunchAgent at `~/Applications/Paneru.app/Contents/MacOS/paneru`.
+This keeps Homebrew as the installation method while avoiding a macOS quirk:
+menu bar visibility is tracked per app identity, and direct service launches
+from Homebrew's Cellar path, Cargo's install path, or `target/debug/paneru` can
+leave multiple `paneru` entries under "Allow in the Menu Bar". The command-line
+`paneru` binary still works for service control and `send-cmd`; the background
+service itself runs from the app bundle.
+
+When you upgrade Paneru with Homebrew or Cargo, run:
+
+```shell
+$ paneru restart
+```
+
+`restart` refreshes the app bundle from the currently installed command-line
+binary before relaunching the service.
+
 ### Running in the foreground
 
 ```shell
 $ paneru
 ```
+
+Foreground runs are useful for debugging, but they run under the identity of
+the current executable. For normal use, prefer the service mode above so macOS
+sees Paneru as the stable `~/Applications/Paneru.app`.
 
 ### Development workflow
 
@@ -181,7 +217,8 @@ $ cargo run -- launch
 ```
 
 Use `paneru install` when you want to update the background service plist, and
-`paneru restart` after installing a new binary with `cargo install --path .`.
+`paneru restart` after installing a new binary with
+`cargo install --path . --locked`.
 
 ### Sending Commands
 
