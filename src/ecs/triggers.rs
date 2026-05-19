@@ -666,14 +666,19 @@ pub(super) fn window_destroyed_trigger(
         };
         app.unobserve_window(window);
 
-        give_away_focus(
-            entity,
-            &windows,
-            active_display.active_strip(),
-            &active_display.bounds(),
-            &mut config,
-            &mut commands,
-        );
+        if !matches!(
+            windows.get_managed(entity),
+            Some((_, _, Some(Unmanaged::Floating)))
+        ) {
+            give_away_focus(
+                entity,
+                &windows,
+                active_display.active_strip(),
+                &active_display.bounds(),
+                &mut config,
+                &mut commands,
+            );
+        }
 
         // NOTE: If the entity had an Unmanaged marker, despawning it will cause it to be re-inserted
         // into the strip again. Therefore we do it just before despawning the entity itself, so it
