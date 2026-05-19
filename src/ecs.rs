@@ -357,10 +357,6 @@ pub struct MissionControlActive(pub bool);
 #[derive(Resource)]
 pub struct FocusFollowsMouse(pub Option<WinID>);
 
-/// Resource holding a pending active-display id observed from passive pointer movement.
-#[derive(Resource)]
-pub struct PendingActiveDisplay(pub Option<u32>);
-
 /// Resource to control whether the application should poll for notifications.
 #[derive(PartialEq, Resource)]
 pub struct PollForNotifications;
@@ -437,7 +433,6 @@ pub fn setup_bevy_app(sender: EventSender, receiver: Receiver<Event>) -> Result<
         })
         .insert_resource(MissionControlActive(false))
         .insert_resource(FocusFollowsMouse(None))
-        .insert_resource(PendingActiveDisplay(None))
         .insert_resource(PollForNotifications)
         .insert_resource(Initializing)
         .insert_non_send_resource(watcher)

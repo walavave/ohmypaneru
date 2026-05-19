@@ -91,18 +91,6 @@ pub(super) fn dispatch_toplevel_triggers(
             Event::SystemWoke { msg } => {
                 debug!("system woke: {msg:?}");
             }
-            Event::Command { .. }
-            | Event::ApplicationFrontSwitched { .. }
-            | Event::MouseDown { .. }
-            | Event::MouseDragged { .. }
-            | Event::Scroll { .. }
-            | Event::Swipe { .. }
-            | Event::VerticalSwipe { .. }
-            | Event::VerticalScrollTick { .. }
-            | Event::TouchpadDown => {
-                commands.trigger(WMEventTrigger(Event::DisplayChangeCommitted));
-                commands.trigger(WMEventTrigger(event.clone()));
-            }
 
             _ => commands.trigger(WMEventTrigger(event.clone())),
         }

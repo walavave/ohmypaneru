@@ -12,7 +12,7 @@ use crate::config::Config;
 use crate::ecs::layout::LayoutStrip;
 use crate::ecs::params::{GlobalState, Windows};
 use crate::ecs::{
-    ActiveWorkspaceMarker, MissionControlActive, Position, Scrolling, Unmanaged, focus_entity,
+    ActiveWorkspaceMarker, MissionControlActive, Position, Scrolling, focus_entity,
     reposition_entity, reshuffle_around, resize_entity,
 };
 use crate::events::Event;
@@ -100,13 +100,6 @@ fn mouse_moved_trigger(
             trace!("can not find focused window: {window_id}");
             continue;
         };
-        if matches!(
-            windows.get_managed(entity),
-            Some((_, _, Some(Unmanaged::Floating)))
-        ) {
-            trace!("skipping focus-follows-mouse for floating window {window_id}");
-            continue;
-        }
 
         let child_window = window_manager
             .get_associated_windows(window_id)

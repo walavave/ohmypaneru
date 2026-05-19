@@ -1,12 +1,10 @@
 use bevy::prelude::*;
-use objc2_core_foundation::CGPoint;
 
 use crate::commands::{Command, Direction, Operation};
 use crate::config::{Config, MainOptions, WindowParams};
 use crate::ecs::{SpawnWindowTrigger, Unmanaged};
 use crate::events::Event;
 use crate::manager::{Origin, Size, Window};
-use crate::platform::Modifiers;
 use crate::{assert_focused, assert_window_at, assert_window_size};
 
 use super::*;
@@ -120,34 +118,6 @@ fn floating_window_left_edge_resize_does_not_move_tiled_windows() {
             assert_window_at!(world, 1, TEST_WINDOW_WIDTH, TEST_MENUBAR_HEIGHT);
             assert_window_at!(world, 0, 700, TEST_MENUBAR_HEIGHT);
             assert_window_size!(world, 0, 500, TEST_DISPLAY_HEIGHT - TEST_MENUBAR_HEIGHT);
-        })
-        .run(commands);
-}
-
-#[test]
-fn focus_follows_mouse_ignores_floating_windows() {
-    let commands = vec![
-        Event::MenuOpened { window_id: 0 },
-        Event::Command {
-            command: Command::PrintState,
-        },
-        Event::MouseMoved {
-            point: CGPoint::new(10.0, 10.0),
-            modifiers: Modifiers::empty(),
-        },
-    ];
-
-    TestHarness::new()
-        .with_windows(3)
-        .on_iteration(0, move |world| {
-            let entity = find_window_entity(0, world);
-            world.entity_mut(entity).insert(Unmanaged::Floating);
-        })
-        .on_iteration(1, move |world| {
-            assert_focused!(world, 2);
-        })
-        .on_iteration(2, move |world| {
-            assert_focused!(world, 2);
         })
         .run(commands);
 }

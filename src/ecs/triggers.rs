@@ -666,10 +666,19 @@ pub(super) fn window_destroyed_trigger(
         };
         app.unobserve_window(window);
 
-        if !matches!(
+        let destroyed_floating = matches!(
             windows.get_managed(entity),
             Some((_, _, Some(Unmanaged::Floating)))
-        ) {
+        );
+        let has_other_floating = windows.iter().any(|(_, candidate)| {
+            candidate != entity
+                && matches!(
+                    windows.get_managed(candidate),
+                    Some((_, _, Some(Unmanaged::Floating)))
+                )
+        });
+
+        if !destroyed_floating || !has_other_floating {
             give_away_focus(
                 entity,
                 &windows,
@@ -683,7 +692,10 @@ pub(super) fn window_destroyed_trigger(
         // NOTE: If the entity had an Unmanaged marker, despawning it will cause it to be re-inserted
         // into the strip again. Therefore we do it just before despawning the entity itself, so it
         // then can be properly removed again in the main entity despawn trigger.
-        commands.entity(entity).remove::<Unmanaged>().despawn();
+        commands
+            .entity(entity)
+            .try_remove::<Unmanaged>()
+            .try_despawn();
 
         // The window entity will be removed from the layout strip in the On<Remove> trigger.
     }

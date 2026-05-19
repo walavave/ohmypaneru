@@ -5,7 +5,7 @@ use bevy::ecs::lifecycle::Add;
 use bevy::ecs::message::MessageReader;
 use bevy::ecs::observer::On;
 use bevy::ecs::query::{Has, With};
-use bevy::ecs::system::{Commands, Query, Res, ResMut};
+use bevy::ecs::system::{Commands, Query, Res};
 use bevy::math::IRect;
 use objc2_core_graphics::CGDirectDisplayID;
 use std::time::Duration;
@@ -14,8 +14,8 @@ use tracing::{Level, debug, error, instrument};
 use crate::config::Config;
 use crate::ecs::layout::LayoutStrip;
 use crate::ecs::{
-    ActiveDisplayMarker, PendingActiveDisplay, Position, RefreshWindowSizes, SelectedVirtualMarker,
-    Timeout, WMEventTrigger,
+    ActiveDisplayMarker, Position, RefreshWindowSizes, SelectedVirtualMarker, Timeout,
+    WMEventTrigger,
 };
 use crate::events::Event;
 use crate::manager::{Display, WindowManager};
@@ -58,31 +58,16 @@ fn display_change_trigger(
     trigger: On<WMEventTrigger>,
     displays: Query<(&Display, Entity, Has<ActiveDisplayMarker>)>,
     window_manager: Res<WindowManager>,
-    mut pending_display: ResMut<PendingActiveDisplay>,
     mut commands: Commands,
 ) {
-    let commit = match trigger.event().0 {
-        Event::DisplayChanged => false,
-        Event::DisplayChangeCommitted => true,
-        _ => return,
+    let Event::DisplayChanged = trigger.event().0 else {
+        return;
     };
 
     let Ok(active_id) = window_manager.active_display_id() else {
         error!("Unable to get active display id!");
         return;
     };
-
-    if !commit {
-        let already_active = displays
-            .iter()
-            .any(|(display, _, active)| active && display.id() == active_id);
-        if !already_active {
-            pending_display.0 = Some(active_id);
-        }
-        return;
-    }
-
-    let active_id = pending_display.0.take().unwrap_or(active_id);
 
     for (display, entity, focused) in displays {
         let display_id = display.id();
@@ -132,7 +117,7 @@ pub(crate) fn displays_rearranged(
             }
             _ => continue,
         }
-        commands.trigger(WMEventTrigger(Event::DisplayChangeCommitted));
+        commands.trigger(WMEventTrigger(Event::DisplayChanged));
     }
 }
 

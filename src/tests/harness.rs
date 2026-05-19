@@ -17,7 +17,7 @@ use crate::ecs::scroll::ScrollEventsPlugin;
 use crate::ecs::workspace::WorkspaceEventsPlugin;
 use crate::ecs::{
     BProcess, ExistingMarker, FocusFollowsMouse, FocusedMarker, Initializing, MissionControlActive,
-    PendingActiveDisplay, PollForNotifications, SkipReshuffle, register_systems, register_triggers,
+    PollForNotifications, SkipReshuffle, register_systems, register_triggers,
 };
 use crate::events::Event;
 use crate::manager::{Application, Origin, Size, Window, WindowManager, WindowManagerApi};
@@ -131,7 +131,6 @@ pub(crate) fn setup_world() -> App {
         .insert_resource(SkipReshuffle(false))
         .insert_resource(MissionControlActive(false))
         .insert_resource(FocusFollowsMouse(None))
-        .insert_resource(PendingActiveDisplay(None))
         .insert_resource(Config::default())
         .insert_resource(Initializing)
         .add_plugins(MouseEventsPlugin)

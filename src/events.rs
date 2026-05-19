@@ -121,8 +121,6 @@ pub enum Event {
     DisplayConfigured { display_id: CGDirectDisplayID },
     /// The overall display arrangement has changed.
     DisplayChanged,
-    /// Apply a previously observed active display change after real user input.
-    DisplayChangeCommitted,
 
     /// Mission Control: Show all windows.
     MissionControlShowAllWindows,

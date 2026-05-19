@@ -6,18 +6,13 @@ use bevy::prelude::*;
 use bevy::time::TimeUpdateStrategy;
 
 use crate::commands::{Command, MoveFocus, Operation};
+use crate::ecs::Timeout;
 use crate::ecs::layout::LayoutStrip;
-use crate::ecs::{ActiveDisplayMarker, Timeout};
 use crate::events::Event;
 use crate::manager::{Display, Origin, Size, Window};
 use crate::{assert_not_on_workspace, assert_on_workspace, assert_window_at, assert_window_size};
 
 use super::*;
-
-fn active_display_id(world: &mut World) -> u32 {
-    let mut query = world.query_filtered::<&Display, With<ActiveDisplayMarker>>();
-    query.single(world).expect("active display").id()
-}
 
 #[test]
 fn test_multi_display_lifecycle() {
@@ -230,60 +225,6 @@ fn test_multi_display_no_height_crosstalk() {
         })
         .on_iteration(4, move |world| {
             assert_window_size!(world, 100, TEST_WINDOW_WIDTH, ext_usable_height);
-        })
-        .run(commands);
-}
-
-#[test]
-fn test_display_change_waits_for_real_input() {
-    let active_display = Arc::new(AtomicU32::new(EXT_DISPLAY_ID));
-    let ad_clone = active_display.clone();
-
-    let mut harness = TestHarness::new();
-    let mock_app = setup_process(harness.app.world_mut());
-    let internal_queue = harness.internal_queue.clone();
-
-    let eq = internal_queue.clone();
-    let app = mock_app;
-    let windows: TestWindowSpawner = Box::new(move |workspace_id| {
-        if workspace_id == EXT_WORKSPACE_ID {
-            let origin = Origin::new(0, 0);
-            let size = Size::new(TEST_WINDOW_WIDTH, TEST_WINDOW_HEIGHT);
-            vec![Window::new(Box::new(MockWindow::new(
-                100,
-                IRect::from_corners(origin, origin + size),
-                eq.clone(),
-                app.clone(),
-            )))]
-        } else {
-            vec![]
-        }
-    });
-
-    let wm = TwoDisplayMock {
-        windows,
-        active_display: active_display.clone(),
-    };
-    harness = harness.with_wm(wm);
-
-    let commands = vec![
-        Event::MenuOpened { window_id: 100 },
-        Event::DisplayChanged,
-        Event::Command {
-            command: Command::PrintState,
-        },
-    ];
-
-    harness
-        .on_iteration(0, move |world| {
-            assert_eq!(active_display_id(world), EXT_DISPLAY_ID);
-            ad_clone.store(TEST_DISPLAY_ID, Ordering::Relaxed);
-        })
-        .on_iteration(1, move |world| {
-            assert_eq!(active_display_id(world), EXT_DISPLAY_ID);
-        })
-        .on_iteration(2, move |world| {
-            assert_eq!(active_display_id(world), TEST_DISPLAY_ID);
         })
         .run(commands);
 }
