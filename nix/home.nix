@@ -41,7 +41,6 @@
           example = {
             options = {
               focus_follows_mouse = true;
-              mouse_follows_focus = true;
             };
             bindings = {
               window_focus_west = "cmd - h";

@@ -249,12 +249,6 @@ impl WindowManagerApi for MockWindowManager {
         false
     }
 
-    /// Does nothing, as mouse centering is not tested at this level.
-    #[instrument(level = Level::DEBUG, skip_all, ret)]
-    fn warp_mouse(&self, _origin: Origin) {
-        debug!("{}:", function_name!());
-    }
-
     /// Always returns an empty vector of windows.
     #[instrument(level = Level::DEBUG, skip_all)]
     fn find_existing_application_windows(
@@ -571,8 +565,6 @@ impl WindowManagerApi for TwoDisplayMock {
     fn is_fullscreen_space(&self, _display_id: CGDirectDisplayID) -> bool {
         false
     }
-
-    fn warp_mouse(&self, _origin: Origin) {}
 
     fn find_existing_application_windows(
         &self,

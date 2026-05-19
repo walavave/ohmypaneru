@@ -98,8 +98,6 @@ pub struct ActiveDisplay<'w, 's> {
         (&'static Display, Entity, Option<&'static DockPosition>),
         With<ActiveDisplayMarker>,
     >,
-    /// A query for all other `Display` components that are not marked as active.
-    other_displays: Query<'w, 's, &'static Display, Without<ActiveDisplayMarker>>,
 }
 
 impl ActiveDisplay<'_, '_> {
@@ -118,10 +116,6 @@ impl ActiveDisplay<'_, '_> {
     }
 
     /// Returns an iterator over immutable references to all other displays (non-active).
-    pub fn other(&self) -> impl Iterator<Item = &Display> {
-        self.other_displays.iter()
-    }
-
     pub fn active_strip(&self) -> &LayoutStrip {
         self.strip.0
     }

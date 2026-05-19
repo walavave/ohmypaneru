@@ -2,7 +2,6 @@ use std::time::Duration;
 
 use bevy::app::{App, Plugin, PostUpdate};
 use bevy::ecs::entity::Entity;
-use bevy::ecs::hierarchy::ChildOf;
 use bevy::ecs::lifecycle::{Add, Remove};
 use bevy::ecs::observer::On;
 use bevy::ecs::query::{Added, Has, With};
@@ -10,21 +9,20 @@ use bevy::ecs::schedule::IntoScheduleConfigs as _;
 use bevy::ecs::system::{Commands, Populated, Query, Res, Single};
 use bevy::prelude::Event as BevyEvent;
 use bevy::time::common_conditions::on_timer;
-use tracing::{Level, debug, error, instrument, trace, warn};
+use tracing::{Level, debug, error, instrument, warn};
 
 use super::{FocusedMarker, MouseHeldMarker, SystemTheme};
 use crate::config::Config;
 use crate::ecs::layout::LayoutStrip;
 use crate::ecs::params::{ActiveDisplay, GlobalState, Windows};
 use crate::ecs::{
-    ActiveWorkspaceMarker, Scrolling, SelectedVirtualMarker, SendMessageTrigger, StrayFocusEvent,
+    ActiveWorkspaceMarker, SelectedVirtualMarker, SendMessageTrigger, StrayFocusEvent,
     focus_entity, reposition_entity, reshuffle_around,
 };
 use crate::events::Event;
-use crate::manager::{Application, Display, Window, WindowManager};
+use crate::manager::{Application, Window, WindowManager};
 
 const REFRESH_WINDOW_CHECK_FREQ_MS: u64 = 1000;
-const MOUSE_FOLLOWS_FOCUS_MIN_VISIBLE_RATIO: f32 = 0.8;
 pub struct FocusEventsPlugin;
 
 impl Plugin for FocusEventsPlugin {
@@ -33,7 +31,6 @@ impl Plugin for FocusEventsPlugin {
             PostUpdate,
             (
                 autocenter_window_on_focus.after(super::systems::animate_resize_entities),
-                mouse_follows_focus.after(super::systems::animate_resize_entities),
                 recover_lost_focus.run_if(on_timer(Duration::from_millis(
                     REFRESH_WINDOW_CHECK_FREQ_MS,
                 ))),
@@ -108,70 +105,6 @@ fn autocenter_window_on_focus(
         reposition_entity(entity, origin, &mut commands);
     }
     reshuffle_around(entity, &mut commands);
-}
-
-#[allow(clippy::needless_pass_by_value)]
-#[instrument(level = Level::DEBUG, skip_all, fields(trigger))]
-fn mouse_follows_focus(
-    focused: Single<Entity, Added<FocusedMarker>>,
-    windows: Windows,
-    global_state: GlobalState,
-    config: Res<Config>,
-    window_manager: Res<WindowManager>,
-    displays: Query<&Display>,
-    workspaces: Query<(
-        &LayoutStrip,
-        &ChildOf,
-        Option<&Scrolling>,
-        Has<ActiveWorkspaceMarker>,
-    )>,
-) {
-    let entity = *focused;
-    let Some(window) = windows.get(entity) else {
-        return;
-    };
-    if workspaces
-        .iter()
-        .find_map(|(_, _, scrolling, active)| if active { scrolling } else { None })
-        .is_some_and(|scrolling| scrolling.is_user_swiping)
-    {
-        debug!("Suppressing center mouse due to a swipe");
-        return;
-    }
-
-    trace!(
-        "window {}, skip_reshuffle {}, ffm flag {:?}.",
-        window.id(),
-        global_state.skip_reshuffle(),
-        global_state.ffm_flag()
-    );
-    if config.mouse_follows_focus()
-        && !global_state.skip_reshuffle()
-        && global_state.ffm_flag().is_none_or(|id| id != window.id())
-        && let Some(frame) = windows.moving_frame(entity)
-        && let Some(display_bounds) = workspaces
-            .into_iter()
-            .find_map(|(strip, child, _, _)| strip.contains(entity).then_some(child))
-            .and_then(|child| displays.get(child.parent()).ok())
-            .map(Display::bounds)
-    {
-        let visible = display_bounds.intersect(frame);
-        let frame_area = frame.width().max(0) * frame.height().max(0);
-        let visible_area = visible.width().max(0) * visible.height().max(0);
-        let visible_ratio = if frame_area > 0 {
-            visible_area as f32 / frame_area as f32
-        } else {
-            0.0
-        };
-
-        if visible_ratio >= MOUSE_FOLLOWS_FOCUS_MIN_VISIBLE_RATIO {
-            return;
-        }
-
-        let origin = visible.center();
-        debug!("centering on {} {origin}", window.id());
-        window_manager.warp_mouse(origin);
-    }
 }
 
 #[allow(clippy::needless_pass_by_value)]

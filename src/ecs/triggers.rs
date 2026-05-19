@@ -96,7 +96,7 @@ pub(super) fn front_switched_trigger(
                     .find_window_at_point(&point)
                     .is_ok_and(|window_id| window_id != focused_id)
             {
-                // Window got focus without mouse movement - probably with a Cmd-Tab.
+                // Window got focus without mouse movement - probably with a Cmd-Tab or Dock click.
                 // If so, bring it into view.
                 config.set_skip_reshuffle(false);
                 config.set_ffm_flag(None);

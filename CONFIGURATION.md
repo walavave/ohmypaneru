@@ -18,9 +18,6 @@ General behavior settings for the window manager.
 | Option | Type | Default | Description |
 | :--- | :--- | :--- | :--- |
 | `focus_follows_mouse` | Boolean | `true` | If enabled, the window under the mouse cursor will automatically gain focus. |
-| `mouse_follows_focus` | Boolean | `true` | If enabled, the mouse cursor will warp to the focused window when focus changes outside keyboard focus commands. |
-| `horizontal_mouse_warp` | Integer ``(-1, 1)`` | Off | If enabled, the mouse will warp to another screen above or below, when touching the left or right edge. The direction depends on the direction - a negative value will cause the left edge to warp to a screen above and the right edge to a screen below. This allows having horizontal positioning of displays while having them aligned in a virtual layout in macOS settings. The cursor lands at the *opposite* edge of the target display (preserving cursor flow), with the source's relative Y position. Carries pre-warp horizontal velocity to avoid a "standing start", and skips the warp when the equivalent Y has no position on the target — matching macOS's native side-by-side behavior for displays of unequal height. (inspired by https://github.com/mogenson/WarpMouse.spoon) |
-| `horizontal_mouse_warp_offset` | Integer (px) | `0` | Vertical pixel offset applied to the `horizontal_mouse_warp` landing position, signed by warp direction. Positive values shift the cursor lower when warping to a display *below* (in macOS arrangement) and higher when warping to one *above*. Use to compensate for physical desk arrangement differing from the macOS arrangement (e.g. portrait monitor sitting physically higher or lower than the laptop). |
 | `preset_column_widths` | Array (Float) | `[0.25, 0.33, 0.5, 0.66, 0.75]` | Ratios of the screen width used by the `window_resize` command to cycle sizes. |
 | `animation_speed` | Float | *None* | Speed of window animations. Comfortable range is from 8 to 20. Unset or set to a very high value to effectively disable animations. |
 | `auto_center` | Boolean | `false` | Automatically center the focused window on the screen when switching focus. |
@@ -121,7 +118,6 @@ Format: `"[modifiers-]key"`. Available modifiers are:
 | `window_equalize` | Make all windows in a stack equal height. |
 | `window_nextdisplay` | Move focused window to the next monitor and follow it. |
 | `window_nextdisplaysend` | Move focused window to the next monitor but stay on current. |
-| `mouse_nextdisplay` | Warp mouse cursor to the next monitor. |
 | `window_snap` | Snap an overflowing window into the viewport. |
 | `quit` | Exit Paneru. |
 

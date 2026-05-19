@@ -77,8 +77,6 @@ inspired by [Niri] and [PaperWM.spoon].
   display.
   A [similar situation](https://nikitabobko.github.io/AeroSpace/guide#proper-monitor-arrangement)
   exists with Aerospace window manager.
-  An option exists (`horizontal_mouse_warp`) which can make a vertical
-  arrangement of displays "feel" horizontal.
 
 - **Off-screen window slivers**. Because macOS will forcibly relocate windows
   that are moved fully off-screen, Paneru keeps a thin sliver of each
@@ -144,7 +142,6 @@ complete guide to all available options, keybindings, and window rules, see the
 # basic .paneru.toml
 [options]
 focus_follows_mouse = true
-mouse_follows_focus = true
 
 [bindings]
 window_focus_west = "cmd - h"
@@ -220,7 +217,6 @@ $ paneru send-cmd <command> [args...]
 | `window virtualsend <dir>` | Send the window to a virtual workspace but stay  |
 | `window virtualsendnum <n>` | Send the window to numbered virtual workspace but stay |
 | `window snap`              | Snap the focused window into the visible viewport |
-| `mouse nextdisplay`        | Warp the mouse pointer to the next display       |
 | `printstate`               | Print the internal ECS state to the debug log    |
 | `quit`                     | Quit Paneru                                      |
 
@@ -283,11 +279,6 @@ scripts, `cron` jobs, or other automation tools:
   [Hammerspoon](https://www.hammerspoon.org) or
   [skhd](https://github.com/koekeishiya/skhd) into `paneru send-cmd` for
   compound actions that go beyond a single hotkey.
-- **Multi-display orchestration.** Move a window to the next display and
-  immediately warp the mouse there:
-  ```shell
-  paneru send-cmd window nextdisplay && paneru send-cmd mouse nextdisplay
-  ```
 - **Status bar integration.** Use `paneru query state --json` to render the
   initial workspace labels, then keep them current with `paneru subscribe --json`.
 

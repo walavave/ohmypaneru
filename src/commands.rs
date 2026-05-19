@@ -93,20 +93,11 @@ pub enum Operation {
     VirtualMoveNumber(u32, MoveFocus),
 }
 
-/// Defines operations that can be performed on the mouse.
-#[derive(Clone, Debug)]
-pub enum MouseMove {
-    /// Moves the mouse pointer to the next available display.
-    ToNextDisplay,
-}
-
 /// Represents a command that can be issued to the window manager.
 #[derive(Clone, Debug)]
 pub enum Command {
     /// A command targeting a window with a specific `Operation`.
     Window(Operation),
-    /// A command targeting the mouse with a specific `MouseOperation`.
-    Mouse(MouseMove),
     /// A command to quit the window manager application.
     Quit,
     PrintState,
@@ -119,7 +110,6 @@ pub fn register_commands(app: &mut bevy::app::App) {
         (
             command_quit_handler,
             print_internal_state_handler,
-            mouse_to_next_display,
             resize_window,
             command_center_window,
             full_width_window,
@@ -277,26 +267,10 @@ fn command_move_focus(
         global_state.set_skip_reshuffle(true);
         focus_entity(entity, true, &mut commands);
         // Explicitly reshuffle so the target window is brought into view.
-        // This avoids a race where focus-follows-mouse leaves skip_reshuffle
-        // set, causing the WindowFocused handler to skip the reshuffle.
+        // This avoids a race where the WindowFocused handler observes the
+        // temporary skip_reshuffle flag before this command brings the target
+        // into view.
         reshuffle_around(entity, &mut commands);
-        return;
-    }
-
-    // Check if the movement can switch to another display.
-    let Some(other_display) = active_display.other().next() else {
-        return;
-    };
-    let change_display = match direction {
-        Direction::North => active_display.bounds().min.y > other_display.bounds().min.y,
-        Direction::South => active_display.bounds().min.y < other_display.bounds().min.y,
-        _ => false,
-    };
-    debug!("moving focus to another display: {change_display}");
-    if change_display {
-        commands.trigger(SendMessageTrigger(Event::Command {
-            command: Command::Mouse(MouseMove::ToNextDisplay),
-        }));
     }
 }
 
@@ -402,7 +376,6 @@ fn command_center_window(
     mut messages: MessageReader<Event>,
     windows: Windows,
     active_display: ActiveDisplay,
-    window_manager: Res<WindowManager>,
     mut commands: Commands,
 ) {
     if filter_window_operations(&mut messages, |op| matches!(op, Operation::Center))
@@ -426,7 +399,6 @@ fn command_center_window(
             strip_position,
             &mut commands,
         );
-        window_manager.warp_mouse(active_display.bounds().center());
     }
 }
 
@@ -722,10 +694,6 @@ fn to_next_display(
     let dest = other.bounds().min.with_x(center - size.x / 2);
     reposition_entity(entity, dest, &mut commands);
 
-    if matches!(move_focus, MoveFocus::Follow) {
-        window_manager.warp_mouse(other.bounds().center());
-    }
-
     // Remove the window from the source strip.
     let source_neighbour = active_display
         .active_strip()
@@ -751,64 +719,6 @@ fn to_next_display(
         target_strip.append(entity);
         reshuffle_around(entity, &mut commands);
     }
-}
-
-/// Moves the mouse pointer to the next available display.
-#[instrument(level = Level::DEBUG, skip_all)]
-#[allow(clippy::needless_pass_by_value)]
-fn mouse_to_next_display(
-    mut messages: MessageReader<Event>,
-    windows: Windows,
-    layout_strips: Query<(&LayoutStrip, Entity)>,
-    displays: Query<(&Display, Entity, Has<ActiveDisplayMarker>)>,
-    window_manager: Res<WindowManager>,
-    mut commands: Commands,
-) {
-    if !messages.read().any(|event| {
-        matches!(
-            event,
-            Event::Command {
-                command: Command::Mouse(MouseMove::ToNextDisplay),
-            }
-        )
-    }) {
-        return;
-    }
-
-    let Some((other, _, _)) = displays.iter().find(|(_, _, active)| !*active) else {
-        debug!("no other display to move mouse to.");
-        return;
-    };
-    let Some((other_strip, _)) = window_manager
-        .active_display_space(other.id())
-        .ok()
-        .and_then(|id| layout_strips.iter().find(|(strip, _)| strip.id() == id))
-    else {
-        return;
-    };
-
-    let visible_width = |frame: IRect| other.bounds().intersect(frame).width();
-    let Some((frame, entity)) = other_strip
-        .all_windows()
-        .iter()
-        .filter_map(|entity| windows.frame(*entity).zip(Some(*entity)))
-        .max_by(|left, right| {
-            if visible_width(left.0) < visible_width(right.0) {
-                std::cmp::Ordering::Less
-            } else {
-                std::cmp::Ordering::Greater
-            }
-        })
-    else {
-        debug!("no suitable windows on the other display to move the mouse.");
-        return;
-    };
-
-    let visible_frame = other.bounds().intersect(frame);
-    debug!("warping mouse to {visible_frame:?}",);
-    window_manager.warp_mouse(visible_frame.center());
-
-    focus_entity(entity, true, &mut commands);
 }
 
 /// Distributes heights equally among all windows in the currently focused stack.

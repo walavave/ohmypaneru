@@ -4,7 +4,7 @@ use bevy::ecs::message::MessageReader;
 use bevy::ecs::query::With;
 use bevy::ecs::schedule::IntoScheduleConfigs as _;
 use bevy::ecs::system::{Commands, Local, Query, Res, Single};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 use tracing::{debug, trace, warn};
 
 use super::{MouseHeldMarker, Timeout};
@@ -16,7 +16,7 @@ use crate::ecs::{
     reposition_entity, reshuffle_around, resize_entity,
 };
 use crate::events::Event;
-use crate::manager::{Display, Origin, WindowManager, origin_from};
+use crate::manager::{Origin, WindowManager, origin_from};
 use crate::platform::WinID;
 
 pub struct MouseEventsPlugin;
@@ -37,7 +37,6 @@ impl Plugin for MouseEventsPlugin {
                 )
                     .run_if(mission_control_inactive),
                 mouse_up_trigger,
-                horizontal_warp_mouse_trigger,
             ),
         );
     }
@@ -279,139 +278,5 @@ fn mouse_resize_trigger(
             frame.max.x += dx;
         }
         resize_entity(entity, frame.size(), &mut commands);
-    }
-}
-
-#[derive(Default)]
-pub(super) struct WarpVelocityState {
-    last: Option<(Origin, Instant)>,
-}
-
-#[allow(clippy::needless_pass_by_value)]
-fn horizontal_warp_mouse_trigger(
-    mut messages: MessageReader<Event>,
-    displays: Query<&Display>,
-    window_manager: Res<WindowManager>,
-    config: Res<Config>,
-    mut state: Local<WarpVelocityState>,
-) {
-    const EDGE_THRESHOLD: i32 = 3;
-    /// Inset from the destination display's edge so the cursor doesn't land
-    /// directly on the threshold and immediately re-warp back.
-    const LANDING_INSET: i32 = 6;
-    /// Extrapolate pre-warp horizontal motion by this duration so the cursor
-    /// does not feel like it starts from rest on the target display.
-    const CARRY_DURATION: Duration = Duration::from_millis(30);
-    /// Cap on how far the carry-over can push past the inset, in pixels.
-    const MAX_CARRY_PX: i32 = 80;
-    /// Stale velocity samples (e.g. from a prior gesture) shouldn't carry.
-    const VELOCITY_FRESHNESS: Duration = Duration::from_millis(80);
-
-    for event in messages.read() {
-        let Event::MouseMoved { point, .. } = event else {
-            continue;
-        };
-
-        let now = Instant::now();
-        let point = origin_from(*point);
-
-        // Compute velocity from the previous sample before deciding whether to
-        // warp, then refresh the sample so subsequent events build on this one.
-        let velocity_x = state.last.and_then(|(prev, t)| {
-            let dt = now.saturating_duration_since(t);
-            if dt.is_zero() || dt > VELOCITY_FRESHNESS {
-                return None;
-            }
-            let dx = f64::from(point.x - prev.x);
-            Some(dx / dt.as_secs_f64())
-        });
-        state.last = Some((point, now));
-
-        let Some(warp_direction) = config.horizontal_mouse_warp() else {
-            return;
-        };
-        if displays.count() < 2 {
-            return;
-        }
-
-        let Some(current_display) = displays
-            .iter()
-            .find(|display| display.bounds().contains(point))
-        else {
-            return;
-        };
-
-        let on_left_edge = (point.x - current_display.bounds().min.x).abs() < EDGE_THRESHOLD;
-        let on_right_edge = (current_display.bounds().max.x - point.x).abs() < EDGE_THRESHOLD;
-        if !on_left_edge && !on_right_edge {
-            return;
-        }
-
-        let mut target_displays = displays
-            .iter()
-            .filter(|display| {
-                let above = display.bounds().min.y < current_display.bounds().min.y;
-                let below = display.bounds().min.y > current_display.bounds().min.y;
-                if on_left_edge {
-                    if warp_direction > 0 { below } else { above }
-                } else if warp_direction > 0 {
-                    above
-                } else {
-                    below
-                }
-            })
-            .collect::<Vec<_>>();
-
-        target_displays
-            .sort_by_key(|display| (display.bounds().min.y - current_display.bounds().min.y).abs());
-        let Some(warp_to) = target_displays.first() else {
-            return;
-        };
-        let target = warp_to.bounds();
-
-        // Land at the *opposite* edge so the cursor flow is continuous: leaving
-        // the right edge appears at the left edge of the target, and vice versa.
-        // Carry over horizontal velocity so the cursor does not feel "stuck" at
-        // the edge — extrapolate motion forward into the target display.
-        let carry = velocity_x
-            .map_or(0, |v| (v * CARRY_DURATION.as_secs_f64()) as i32)
-            .clamp(-MAX_CARRY_PX, MAX_CARRY_PX);
-        let target_x = if on_left_edge {
-            // Cursor was moving leftward; carry is negative. Push further from
-            // the right edge of the target.
-            (target.max.x - LANDING_INSET + carry).clamp(target.min.x + 1, target.max.x - 1)
-        } else {
-            // Cursor was moving rightward; carry is positive. Push further from
-            // the left edge of the target.
-            (target.min.x + LANDING_INSET + carry).clamp(target.min.x + 1, target.max.x - 1)
-        };
-
-        // Preserve relative Y offset from the source display's top so vertical
-        // motion feels continuous (matches macOS's behavior for side-by-side
-        // displays). Apply the configured offset signed by warp direction:
-        // positive offset pushes the cursor lower when warping downward, and
-        // raises it when warping upward — matching the user's physical desk
-        // arrangement (e.g. monitor sitting below the laptop).
-        // If the equivalent position falls outside the target's Y range (e.g. a
-        // tall portrait monitor's bottom region maps off a shorter laptop's
-        // bottom), skip the warp — matches macOS native side-by-side behavior
-        // where the cursor can only cross at Y values where both displays exist.
-        let relative_y = point.y - current_display.bounds().min.y;
-        let direction_sign = if target.min.y > current_display.bounds().min.y {
-            1
-        } else {
-            -1
-        };
-        let signed_offset = config.horizontal_mouse_warp_offset() * direction_sign;
-        let target_y = target.min.y + relative_y + signed_offset;
-        if target_y < target.min.y || target_y >= target.max.y {
-            return;
-        }
-
-        let landing = Origin::new(target_x, target_y);
-        window_manager.warp_mouse(landing);
-        // Reset the velocity sample to the landing point so the next motion
-        // event computes velocity from the new position, not the pre-warp one.
-        state.last = Some((landing, now));
     }
 }

@@ -8,10 +8,7 @@ use objc2_core_foundation::{
     CFArray, CFDictionary, CFMutableData, CFNumber, CFNumberType, CFRetained, CFString, CFType,
     CGPoint, CGRect, CGSize, kCFBooleanTrue,
 };
-use objc2_core_graphics::{
-    CGAssociateMouseAndMouseCursorPosition, CGDirectDisplayID, CGDisplayBounds,
-    CGGetActiveDisplayList, CGWarpMouseCursorPosition,
-};
+use objc2_core_graphics::{CGDirectDisplayID, CGDisplayBounds, CGGetActiveDisplayList};
 use std::path::Path;
 use std::ptr::null_mut;
 use std::slice::from_raw_parts_mut;
@@ -51,10 +48,6 @@ pub type Size = IVec2;
 
 pub fn origin_from(point: CGPoint) -> Origin {
     Origin::new(point.x as i32, point.y as i32)
-}
-
-pub fn origin_to(point: Origin) -> CGPoint {
-    CGPoint::new(point.x.into(), point.y.into())
 }
 
 pub fn size_from(size: CGSize) -> Size {
@@ -112,13 +105,6 @@ pub trait WindowManagerApi: Send + Sync {
     fn active_display_space(&self, display_id: CGDirectDisplayID) -> Result<WorkspaceId>;
     /// Returns `true` if the current space on the given display is a native fullscreen space.
     fn is_fullscreen_space(&self, display_id: CGDirectDisplayID) -> bool;
-    /// Centers the mouse cursor on a given window within its display bounds if it's not already within the window.
-    ///
-    /// # Arguments
-    ///
-    /// * `window` - A reference to the `Window` to center the mouse on.
-    /// * `display_bounds` - The `CGRect` representing the bounds of the display the window is on.
-    fn warp_mouse(&self, origin: Origin);
     /// Adds existing windows for a given application, potentially resolving unresolved windows.
     ///
     /// # Arguments
@@ -381,21 +367,6 @@ impl WindowManagerApi for WindowManagerOS {
     fn is_fullscreen_space(&self, display_id: CGDirectDisplayID) -> bool {
         self.active_display_space(display_id)
             .is_ok_and(|space_id| unsafe { SLSSpaceGetType(self.main_cid, space_id) } == 4)
-    }
-
-    /// Centers the mouse cursor on the window if it's not already within the window's bounds.
-    #[instrument(level = Level::DEBUG, skip_all, fields(window))]
-    fn warp_mouse(&self, origin: Origin) {
-        // Drop the local-event suppression interval to zero so HID mouse
-        // events resume immediately after the warp. The default 250ms
-        // interval drops physical mouse motion in that window, making the
-        // cursor feel "stuck" at the warped position.
-        #[allow(deprecated)]
-        objc2_core_graphics::CGSetLocalEventsSuppressionInterval(0.0);
-        CGWarpMouseCursorPosition(origin_to(origin));
-        // Re-associate the mouse and cursor so HID input continues to drive
-        // the cursor immediately after the warp.
-        CGAssociateMouseAndMouseCursorPosition(true);
     }
 
     /// Adds existing windows for a given application, attempting to resolve any that are not yet found.
