@@ -39,7 +39,10 @@ objc2-app-kit = { version = "0.3.2", features = [
   "NSColor",
   "NSGraphics",
   "NSGraphicsContext",
+  "NSMenu",
+  "NSMenuItem",
   "NSScreen",
+  "NSWorkspace",
   "NSView",
   "NSWindow",
   "NSFont",
@@ -60,6 +63,8 @@ objc2-foundation = { version = "0.3.2", features = [
   "NSAttributedString",
   "NSDictionary",
   "NSBundle",
+  "NSObject",
+  "NSURL",
 ] }
 regex = "1.12.3"
 scopeguard = "1.2.0"

@@ -2,7 +2,7 @@ use bevy::prelude::*;
 
 use crate::commands::{Command, Direction, Operation};
 use crate::config::{Config, MainOptions, WindowParams};
-use crate::ecs::SpawnWindowTrigger;
+use crate::ecs::{SpawnWindowTrigger, Unmanaged};
 use crate::events::Event;
 use crate::manager::{Origin, Size, Window};
 use crate::{assert_focused, assert_window_at, assert_window_size};
@@ -81,6 +81,43 @@ fn test_offscreen_windows_preserve_height() {
             assert_window_size!(world, 2, TEST_WINDOW_WIDTH, expected_height);
             assert_window_size!(world, 1, TEST_WINDOW_WIDTH, expected_height);
             assert_window_size!(world, 0, TEST_WINDOW_WIDTH, expected_height);
+        })
+        .run(commands);
+}
+
+#[test]
+fn floating_window_left_edge_resize_does_not_move_tiled_windows() {
+    let commands = vec![
+        Event::MenuOpened { window_id: 0 },
+        Event::MenuOpened { window_id: 0 },
+        Event::WindowResized { window_id: 0 },
+    ];
+
+    TestHarness::new()
+        .with_windows(3)
+        .on_iteration(0, move |world| {
+            let mut windows = world.query::<(&Window, Entity)>();
+            let (_, entity) = windows
+                .iter(world)
+                .find(|(window, _)| window.id() == 0)
+                .expect("window not found");
+            world.entity_mut(entity).insert(Unmanaged::Floating);
+        })
+        .on_iteration(1, move |world| {
+            let mut windows = world.query::<&mut Window>();
+            let mut window = windows
+                .iter_mut(world)
+                .find(|window| window.id() == 0)
+                .expect("window not found");
+
+            window.reposition(Origin::new(700, TEST_MENUBAR_HEIGHT));
+            window.resize(Size::new(500, TEST_DISPLAY_HEIGHT - TEST_MENUBAR_HEIGHT));
+        })
+        .on_iteration(2, move |world| {
+            assert_window_at!(world, 2, 0, TEST_MENUBAR_HEIGHT);
+            assert_window_at!(world, 1, TEST_WINDOW_WIDTH, TEST_MENUBAR_HEIGHT);
+            assert_window_at!(world, 0, 700, TEST_MENUBAR_HEIGHT);
+            assert_window_size!(world, 0, 500, TEST_DISPLAY_HEIGHT - TEST_MENUBAR_HEIGHT);
         })
         .run(commands);
 }

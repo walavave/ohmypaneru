@@ -444,12 +444,12 @@ pub fn setup_bevy_app(sender: EventSender, receiver: Receiver<Event>) -> Result<
         .add_plugins(display::DisplayEventsPlugin)
         .add_plugins((register_triggers, register_systems, register_commands));
 
-    let mut platform_callbacks = PlatformCallbacks::new(sender);
+    let mut platform_callbacks = PlatformCallbacks::new(sender.clone());
     platform_callbacks.setup_handlers()?;
     let mtm = platform_callbacks.main_thread_marker;
     let overlay_manager = OverlayManager::new(mtm);
     let flash_message_manager = FlashMessageManager::new(mtm);
-    let menu_bar_manager = MenuBarManager::new(mtm);
+    let menu_bar_manager = MenuBarManager::new(mtm, sender);
     app.insert_non_send_resource(platform_callbacks)
         .insert_non_send_resource(overlay_manager)
         .insert_non_send_resource(flash_message_manager)

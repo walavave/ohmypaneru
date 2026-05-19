@@ -694,11 +694,24 @@ pub(super) fn pump_events(
     }
 }
 
+type ResizedWindowQuery<'w, 's> = Query<
+    'w,
+    's,
+    (
+        &'static mut Window,
+        Entity,
+        &'static mut Position,
+        &'static mut Bounds,
+        Option<&'static Unmanaged>,
+    ),
+    Without<LayoutStrip>,
+>;
+
 #[allow(clippy::needless_pass_by_value)]
 #[instrument(level = Level::TRACE, skip_all)]
 pub(super) fn window_resized_update_frame(
     mut messages: MessageReader<Event>,
-    mut windows: Query<(&mut Window, Entity, &Position, &mut Bounds), Without<LayoutStrip>>,
+    mut windows: ResizedWindowQuery,
     mut active_workspace: Single<(&LayoutStrip, &mut Position), With<ActiveWorkspaceMarker>>,
 ) {
     for event in messages.read() {
@@ -706,7 +719,7 @@ pub(super) fn window_resized_update_frame(
             continue;
         };
 
-        let Some((mut window, entity, position, mut bounds)) = windows
+        let Some((mut window, entity, mut position, mut bounds, unmanaged)) = windows
             .iter_mut()
             .find(|window| window.0.id() == *window_id)
         else {
@@ -719,6 +732,13 @@ pub(super) fn window_resized_update_frame(
         let old_frame = IRect::from_corners(position.0, position.0 + bounds.0);
         if old_frame.size() != new_frame.size() {
             bounds.0 = new_frame.size();
+        }
+
+        if unmanaged.is_some() {
+            if old_frame.min != new_frame.min {
+                position.0 = new_frame.min;
+            }
+            continue;
         }
 
         // If the window was resized, shift LayoutStrip slightly to avoid moving right corner.
@@ -734,7 +754,8 @@ pub(super) fn window_resized_update_frame(
         let diff = old_frame.min.y - new_frame.min.y;
         if diff.abs() > 0
             && let Some(above_entity) = active_strip.above(entity)
-            && let Ok((_, _, _, mut above_bounds)) = windows.get_mut(above_entity)
+            && let Ok((_, _, _, mut above_bounds, above_unmanaged)) = windows.get_mut(above_entity)
+            && above_unmanaged.is_none()
             && above_bounds.0.y - diff > 200
         {
             above_bounds.0.y -= diff;

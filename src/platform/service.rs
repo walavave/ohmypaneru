@@ -2,6 +2,7 @@ use std::{
     env, fs,
     io::{Cursor, Error, ErrorKind, Result, Write},
     path::{Path, PathBuf},
+    process::Command,
 };
 
 use base64::{Engine, engine::general_purpose};
@@ -207,6 +208,7 @@ impl Service {
 
         let info_plist_path = contents_path.join("Info.plist");
         fs::write(info_plist_path, self.app_info_plist())?;
+        sign_app_bundle(&app_path)?;
 
         info!(
             "installed or updated app bundle at `{}`",
@@ -302,6 +304,23 @@ fn paths_equal(a: &Path, b: &Path) -> Result<bool> {
         (Ok(_), Err(error)) if error.kind() == ErrorKind::NotFound => Ok(false),
         (Err(error), _) | (_, Err(error)) => Err(error),
     }
+}
+
+fn sign_app_bundle(app_path: &Path) -> Result<()> {
+    let output = Command::new("codesign")
+        .args(["--force", "--deep", "--sign", "-"])
+        .arg(app_path)
+        .output()?;
+
+    if output.status.success() {
+        return Ok(());
+    }
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    Err(Error::other(format!(
+        "codesign failed for `{}`: {stderr}",
+        app_path.display()
+    )))
 }
 
 fn remove_menu_bar_entries_from_control_center_plist(plist_path: &Path) -> Result<usize> {
