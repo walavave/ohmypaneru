@@ -17,7 +17,7 @@ use std::ptr::null_mut;
 use std::sync::{Arc, LazyLock};
 use std::time::{Duration, Instant};
 use stdext::function_name;
-use tracing::{error, info};
+use tracing::{error, info, warn};
 
 use crate::config::Config;
 use crate::errors::{Error, Result};
@@ -201,11 +201,15 @@ impl InputHandler {
         let modifiers = get_modifiers(flags);
 
         let result = match event_type {
-            CGEventType::TapDisabledByTimeout | CGEventType::TapDisabledByUserInput => {
-                info!("Tap Disabled");
+            CGEventType::TapDisabledByTimeout => {
+                info!("event tap disabled by timeout; re-enabling");
                 if let Some(port) = &self.tap_port {
                     CGEvent::tap_enable(port, true);
                 }
+                Ok(())
+            }
+            CGEventType::TapDisabledByUserInput => {
+                warn!("event tap disabled by user input or permission change; leaving it disabled");
                 Ok(())
             }
             CGEventType::LeftMouseDown | CGEventType::RightMouseDown => {
@@ -242,7 +246,11 @@ impl InputHandler {
         if let Err(err) = result {
             error!("error sending event: {err}");
             // The socket is dead, so no use trying to send to it.
-            // Trigger cleanup destructor, unregistering the handler.
+            // Disable the tap immediately so any later events pass through the
+            // system without waiting for the owner to clean up this handler.
+            if let Some(port) = &self.tap_port {
+                CGEvent::tap_enable(port, false);
+            }
             self.events = None;
         }
         // Do not intercept this event, let it fall through.

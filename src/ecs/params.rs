@@ -115,7 +115,6 @@ impl ActiveDisplay<'_, '_> {
         self.display.1
     }
 
-    /// Returns an iterator over immutable references to all other displays (non-active).
     pub fn active_strip(&self) -> &LayoutStrip {
         self.strip.0
     }
