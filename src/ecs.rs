@@ -205,6 +205,10 @@ pub struct ResizeMarker(pub Size);
 #[derive(Component)]
 pub struct ReshuffleAroundMarker;
 
+/// Marker component for a floating window being explicitly returned to the layout.
+#[derive(Component)]
+pub struct StableRetileMarker;
+
 #[derive(Component, Debug)]
 pub struct Scrolling {
     pub velocity: f64,

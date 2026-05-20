@@ -2,7 +2,8 @@ use bevy::prelude::*;
 
 use crate::commands::{Command, Direction, Operation};
 use crate::config::{Config, MainOptions, WindowParams};
-use crate::ecs::{SpawnWindowTrigger, Unmanaged};
+use crate::ecs::layout::LayoutStrip;
+use crate::ecs::{LayoutPosition, Position, SpawnWindowTrigger, StableRetileMarker, Unmanaged};
 use crate::events::Event;
 use crate::manager::{Origin, Size, Window};
 use crate::{assert_focused, assert_window_at, assert_window_size};
@@ -118,6 +119,50 @@ fn floating_window_left_edge_resize_does_not_move_tiled_windows() {
             assert_window_at!(world, 1, TEST_WINDOW_WIDTH, TEST_MENUBAR_HEIGHT);
             assert_window_at!(world, 0, 700, TEST_MENUBAR_HEIGHT);
             assert_window_size!(world, 0, 500, TEST_DISPLAY_HEIGHT - TEST_MENUBAR_HEIGHT);
+        })
+        .run(commands);
+}
+
+#[test]
+fn retiling_floating_window_centers_after_layout_updates() {
+    let commands = vec![
+        Event::MenuOpened { window_id: 0 },
+        Event::MenuOpened { window_id: 0 },
+        Event::MenuOpened { window_id: 0 },
+    ];
+
+    TestHarness::new()
+        .with_windows(3)
+        .on_iteration(0, move |world| {
+            let entity = find_window_entity(2, world);
+            world.entity_mut(entity).insert(Unmanaged::Floating);
+        })
+        .on_iteration(1, move |world| {
+            let entity = find_window_entity(2, world);
+            world
+                .entity_mut(entity)
+                .insert(StableRetileMarker)
+                .remove::<Unmanaged>();
+        })
+        .on_iteration(2, move |world| {
+            let entity = find_window_entity(2, world);
+            let mut strips = world.query::<(&LayoutStrip, &Position, Entity)>();
+            let (_, strip_position, _) = strips
+                .iter(world)
+                .find(|(strip, _, _)| strip.contains(entity))
+                .expect("strip containing re-tiled window not found");
+
+            let layout_position = world
+                .get::<LayoutPosition>(entity)
+                .expect("re-tiled window should have a layout position");
+            assert_eq!(
+                strip_position.0.x,
+                TEST_DISPLAY_WIDTH / 2 - layout_position.0.x - TEST_WINDOW_WIDTH / 2
+            );
+            assert!(
+                world.get::<StableRetileMarker>(entity).is_none(),
+                "stable retile marker should be consumed"
+            );
         })
         .run(commands);
 }

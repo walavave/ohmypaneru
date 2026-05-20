@@ -16,7 +16,8 @@ use tracing::{Level, debug, error, info, instrument, trace, warn};
 
 use super::{
     ActiveDisplayMarker, BProcess, FocusedMarker, FreshMarker, MissionControlActive,
-    RetryFrontSwitch, SpawnWindowTrigger, StrayFocusEvent, SystemTheme, Timeout, Unmanaged,
+    RetryFrontSwitch, SpawnWindowTrigger, StableRetileMarker, StrayFocusEvent, SystemTheme,
+    Timeout, Unmanaged,
 };
 use crate::config::{Config, WindowParams};
 use crate::ecs::layout::LayoutStrip;
@@ -574,13 +575,14 @@ pub(super) fn window_minimized_trigger(
     }
 }
 
-#[allow(clippy::needless_pass_by_value)]
+#[allow(clippy::needless_pass_by_value, clippy::too_many_arguments)]
 #[instrument(level = Level::DEBUG, skip_all, fields(trigger))]
 pub(super) fn window_managed_trigger(
     trigger: On<Remove, Unmanaged>,
     mut active_display: ActiveDisplayMut,
     windows: Windows,
     apps: Query<(Entity, &Application)>,
+    stable_retile: Query<(), With<StableRetileMarker>>,
     config: Res<Config>,
     initializing: Option<Res<Initializing>>,
     mut commands: Commands,
@@ -590,6 +592,7 @@ pub(super) fn window_managed_trigger(
         return;
     }
     let entity = trigger.event().entity;
+    let keep_strip_position = stable_retile.contains(entity);
 
     debug!("Entity {entity} is managed again.");
     let display_bounds = active_display
@@ -615,15 +618,36 @@ pub(super) fn window_managed_trigger(
         if properties.floating() {
             return;
         }
-        if let Some(index) = properties.insertion() {
+        if let Some(index) = properties.insertion().or_else(|| {
+            keep_strip_position
+                .then(|| retile_insertion_index(entity, active_strip, &windows))
+                .flatten()
+        }) {
             active_strip.insert_at(index, entity);
-            reshuffle_around(entity, &mut commands);
+            if !keep_strip_position {
+                reshuffle_around(entity, &mut commands);
+            }
             return;
         }
     }
 
     active_strip.append(entity);
-    reshuffle_around(entity, &mut commands);
+    if !keep_strip_position {
+        reshuffle_around(entity, &mut commands);
+    }
+}
+
+fn retile_insertion_index(entity: Entity, strip: &LayoutStrip, windows: &Windows) -> Option<usize> {
+    let center = windows.moving_frame(entity)?.center().x;
+    strip
+        .all_columns()
+        .into_iter()
+        .enumerate()
+        .find_map(|(index, candidate)| {
+            let candidate_center = windows.moving_frame(candidate)?.center().x;
+            (center < candidate_center).then_some(index)
+        })
+        .or_else(|| Some(strip.len()))
 }
 
 /// Handles the event when a window is destroyed. The windows itself is not removed from the layout
@@ -1149,7 +1173,7 @@ pub(super) fn restore_window_state(
     };
 
     let mut new_strips: Vec<(LayoutStrip, Entity)> = Vec::new();
-    for (mut strip, _, child) in &mut workspaces {
+    for (mut strip, active, child) in &mut workspaces {
         let restore = strip
             .all_windows()
             .into_iter()
@@ -1217,6 +1241,10 @@ pub(super) fn restore_window_state(
                     }
                 }
             }
+        }
+
+        if active && let Some(entity) = strip.first().ok().and_then(|column| column.top()) {
+            focus_entity(entity, true, &mut commands);
         }
     }
 

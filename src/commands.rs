@@ -15,8 +15,8 @@ use crate::ecs::layout::{Column, LayoutStrip, StackItem};
 use crate::ecs::params::{ActiveDisplay, ActiveDisplayMut, Windows};
 use crate::ecs::{
     ActiveDisplayMarker, ActiveWorkspaceMarker, Bounds, FocusedMarker, FullWidthMarker,
-    NativeFullscreenMarker, SelectedVirtualMarker, SendMessageTrigger, Unmanaged, focus_entity,
-    reposition_entity, reshuffle_around, resize_entity,
+    NativeFullscreenMarker, SelectedVirtualMarker, SendMessageTrigger, StableRetileMarker,
+    Unmanaged, focus_entity, reposition_entity, reshuffle_around, resize_entity,
 };
 use crate::events::Event;
 use crate::manager::{Application, Display, Origin, Size, Window, WindowManager};
@@ -589,10 +589,7 @@ fn manage_window(
         return;
     }
 
-    let Some((window, entity, unmanaged)) = windows
-        .focused()
-        .and_then(|(_, entity)| windows.get_managed(entity))
-    else {
+    let Some((window, entity, unmanaged)) = command_focused_window(&windows, &apps) else {
         return;
     };
     debug!(
@@ -601,7 +598,10 @@ fn manage_window(
         unmanaged.is_some()
     );
     if unmanaged.is_some() {
-        commands.entity(entity).try_remove::<Unmanaged>();
+        commands
+            .entity(entity)
+            .try_insert(StableRetileMarker)
+            .try_remove::<Unmanaged>();
     } else {
         commands.entity(entity).try_insert(Unmanaged::Floating);
     }
@@ -620,6 +620,21 @@ fn manage_window(
                 .inspect_err(|err| debug!("reloading config after managing {bundle_id}: {err}"));
         }
     }
+}
+
+fn command_focused_window<'a>(
+    windows: &'a Windows,
+    apps: &Query<&Application>,
+) -> Option<(&'a Window, Entity, Option<&'a Unmanaged>)> {
+    let ax_focused = apps
+        .iter()
+        .filter(|app| app.is_frontmost())
+        .find_map(|app| app.focused_window_id().ok())
+        .and_then(|window_id| windows.find(window_id).map(|(_, entity)| entity));
+
+    ax_focused
+        .or_else(|| windows.focused().map(|(_, entity)| entity))
+        .and_then(|entity| windows.get_managed(entity))
 }
 
 /// Moves the focused window to the next available display.

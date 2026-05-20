@@ -16,8 +16,8 @@ use crate::config::Config;
 use crate::ecs::layout::LayoutStrip;
 use crate::ecs::params::{ActiveDisplay, GlobalState, Windows};
 use crate::ecs::{
-    ActiveWorkspaceMarker, SelectedVirtualMarker, SendMessageTrigger, StrayFocusEvent,
-    focus_entity, reposition_entity, reshuffle_around,
+    ActiveWorkspaceMarker, SelectedVirtualMarker, SendMessageTrigger, StableRetileMarker,
+    StrayFocusEvent, focus_entity, reposition_entity, reshuffle_around,
 };
 use crate::events::Event;
 use crate::manager::{Application, Window, WindowManager};
@@ -31,6 +31,7 @@ impl Plugin for FocusEventsPlugin {
             PostUpdate,
             (
                 autocenter_window_on_focus.after(super::systems::animate_resize_entities),
+                autocenter_stable_retiled_window.after(autocenter_window_on_focus),
                 recover_lost_focus.run_if(on_timer(Duration::from_millis(
                     REFRESH_WINDOW_CHECK_FREQ_MS,
                 ))),
@@ -95,16 +96,72 @@ fn autocenter_window_on_focus(
     if global_state.skip_reshuffle() || global_state.initializing() || !mouse_held.is_empty() {
         return;
     }
-    if config.auto_center()
+    bring_window_into_focus_view(
+        entity,
+        FocusViewMode::RespectConfig,
+        &windows,
+        &active_display,
+        &config,
+        &mut commands,
+    );
+}
+
+#[allow(clippy::needless_pass_by_value)]
+#[instrument(level = Level::DEBUG, skip_all)]
+fn autocenter_stable_retiled_window(
+    retiled: Populated<Entity, With<StableRetileMarker>>,
+    windows: Windows,
+    active_display: ActiveDisplay,
+    config: Res<Config>,
+    mut commands: Commands,
+) {
+    for entity in retiled {
+        bring_window_into_focus_view(
+            entity,
+            FocusViewMode::Center,
+            &windows,
+            &active_display,
+            &config,
+            &mut commands,
+        );
+        commands.entity(entity).try_remove::<StableRetileMarker>();
+    }
+}
+
+#[derive(Clone, Copy)]
+enum FocusViewMode {
+    RespectConfig,
+    Center,
+}
+
+fn bring_window_into_focus_view(
+    entity: Entity,
+    mode: FocusViewMode,
+    windows: &Windows,
+    active_display: &ActiveDisplay,
+    config: &Config,
+    commands: &mut Commands,
+) {
+    let should_center = match mode {
+        FocusViewMode::RespectConfig => config.auto_center(),
+        FocusViewMode::Center => true,
+    };
+
+    if should_center
         && let Some((_, _, None)) = windows.get_managed(entity)
         && let Some(size) = windows.size(entity)
-        && let Some(mut origin) = windows.origin(entity)
+        && let Some(layout_position) = windows.layout_position(entity)
     {
-        let center = active_display.bounds().center();
-        origin.x = center.x - size.x / 2;
-        reposition_entity(entity, origin, &mut commands);
+        let viewport = active_display.bounds();
+        let x = viewport.center().x - layout_position.0.x - size.x / 2;
+        reposition_entity(
+            active_display.active_strip_entity(),
+            viewport.min.with_x(x),
+            commands,
+        );
+        return;
     }
-    reshuffle_around(entity, &mut commands);
+    reshuffle_around(entity, commands);
 }
 
 #[allow(clippy::needless_pass_by_value)]
