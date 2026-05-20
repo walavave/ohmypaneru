@@ -15,8 +15,8 @@ use crate::ecs::layout::{Column, LayoutStrip, StackItem};
 use crate::ecs::params::{ActiveDisplay, ActiveDisplayMut, Windows};
 use crate::ecs::{
     ActiveDisplayMarker, ActiveWorkspaceMarker, Bounds, FocusedMarker, FullWidthMarker,
-    NativeFullscreenMarker, SelectedVirtualMarker, SendMessageTrigger, StableRetileMarker,
-    Unmanaged, focus_entity, reposition_entity, reshuffle_around, resize_entity,
+    NativeFullscreenMarker, RetileMarker, SelectedVirtualMarker, SendMessageTrigger, Unmanaged,
+    focus_entity, reposition_entity, reshuffle_around, resize_entity,
 };
 use crate::events::Event;
 use crate::manager::{Application, Display, Origin, Size, Window, WindowManager};
@@ -598,9 +598,12 @@ fn manage_window(
         unmanaged.is_some()
     );
     if unmanaged.is_some() {
+        let previous_center_x = windows
+            .moving_frame(entity)
+            .map_or_else(|| window.frame().center().x, |frame| frame.center().x);
         commands
             .entity(entity)
-            .try_insert(StableRetileMarker)
+            .try_insert(RetileMarker { previous_center_x })
             .try_remove::<Unmanaged>();
     } else {
         commands.entity(entity).try_insert(Unmanaged::Floating);

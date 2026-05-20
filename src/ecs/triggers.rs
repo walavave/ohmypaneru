@@ -15,9 +15,8 @@ use std::time::Duration;
 use tracing::{Level, debug, error, info, instrument, trace, warn};
 
 use super::{
-    ActiveDisplayMarker, BProcess, FocusedMarker, FreshMarker, MissionControlActive,
-    RetryFrontSwitch, SpawnWindowTrigger, StableRetileMarker, StrayFocusEvent, SystemTheme,
-    Timeout, Unmanaged,
+    ActiveDisplayMarker, BProcess, FocusedMarker, FreshMarker, MissionControlActive, RetileMarker,
+    RetryFrontSwitch, SpawnWindowTrigger, StrayFocusEvent, SystemTheme, Timeout, Unmanaged,
 };
 use crate::config::{Config, WindowParams};
 use crate::ecs::layout::LayoutStrip;
@@ -582,7 +581,7 @@ pub(super) fn window_managed_trigger(
     mut active_display: ActiveDisplayMut,
     windows: Windows,
     apps: Query<(Entity, &Application)>,
-    stable_retile: Query<(), With<StableRetileMarker>>,
+    retile_markers: Query<&RetileMarker>,
     config: Res<Config>,
     initializing: Option<Res<Initializing>>,
     mut commands: Commands,
@@ -592,7 +591,7 @@ pub(super) fn window_managed_trigger(
         return;
     }
     let entity = trigger.event().entity;
-    let keep_strip_position = stable_retile.contains(entity);
+    let retile = retile_markers.get(entity).ok();
 
     debug!("Entity {entity} is managed again.");
     let display_bounds = active_display
@@ -619,12 +618,12 @@ pub(super) fn window_managed_trigger(
             return;
         }
         if let Some(index) = properties.insertion().or_else(|| {
-            keep_strip_position
-                .then(|| retile_insertion_index(entity, active_strip, &windows))
-                .flatten()
+            retile.map(|marker| {
+                retile_insertion_index(marker.previous_center_x, active_strip, &windows)
+            })
         }) {
             active_strip.insert_at(index, entity);
-            if !keep_strip_position {
+            if retile.is_none() {
                 reshuffle_around(entity, &mut commands);
             }
             return;
@@ -632,22 +631,21 @@ pub(super) fn window_managed_trigger(
     }
 
     active_strip.append(entity);
-    if !keep_strip_position {
+    if retile.is_none() {
         reshuffle_around(entity, &mut commands);
     }
 }
 
-fn retile_insertion_index(entity: Entity, strip: &LayoutStrip, windows: &Windows) -> Option<usize> {
-    let center = windows.moving_frame(entity)?.center().x;
+fn retile_insertion_index(center_x: i32, strip: &LayoutStrip, windows: &Windows) -> usize {
     strip
         .all_columns()
         .into_iter()
         .enumerate()
         .find_map(|(index, candidate)| {
             let candidate_center = windows.moving_frame(candidate)?.center().x;
-            (center < candidate_center).then_some(index)
+            (center_x < candidate_center).then_some(index)
         })
-        .or_else(|| Some(strip.len()))
+        .unwrap_or_else(|| strip.len())
 }
 
 /// Handles the event when a window is destroyed. The windows itself is not removed from the layout

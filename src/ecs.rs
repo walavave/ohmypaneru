@@ -205,9 +205,12 @@ pub struct ResizeMarker(pub Size);
 #[derive(Component)]
 pub struct ReshuffleAroundMarker;
 
-/// Marker component for a floating window being explicitly returned to the layout.
+/// Tracks a floating window that is being explicitly returned to the layout.
 #[derive(Component)]
-pub struct StableRetileMarker;
+pub struct RetileMarker {
+    /// The screen-space x center before the floating window re-enters the strip.
+    pub previous_center_x: i32,
+}
 
 #[derive(Component, Debug)]
 pub struct Scrolling {

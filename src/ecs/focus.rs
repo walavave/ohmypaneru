@@ -16,7 +16,7 @@ use crate::config::Config;
 use crate::ecs::layout::LayoutStrip;
 use crate::ecs::params::{ActiveDisplay, GlobalState, Windows};
 use crate::ecs::{
-    ActiveWorkspaceMarker, SelectedVirtualMarker, SendMessageTrigger, StableRetileMarker,
+    ActiveWorkspaceMarker, RetileMarker, SelectedVirtualMarker, SendMessageTrigger,
     StrayFocusEvent, focus_entity, reposition_entity, reshuffle_around,
 };
 use crate::events::Event;
@@ -109,7 +109,7 @@ fn autocenter_window_on_focus(
 #[allow(clippy::needless_pass_by_value)]
 #[instrument(level = Level::DEBUG, skip_all)]
 fn autocenter_stable_retiled_window(
-    retiled: Populated<Entity, With<StableRetileMarker>>,
+    retiled: Populated<Entity, With<RetileMarker>>,
     windows: Windows,
     active_display: ActiveDisplay,
     config: Res<Config>,
@@ -124,7 +124,7 @@ fn autocenter_stable_retiled_window(
             &config,
             &mut commands,
         );
-        commands.entity(entity).try_remove::<StableRetileMarker>();
+        commands.entity(entity).try_remove::<RetileMarker>();
     }
 }
 

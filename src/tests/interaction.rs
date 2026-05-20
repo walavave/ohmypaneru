@@ -3,7 +3,7 @@ use bevy::prelude::*;
 use crate::commands::{Command, Direction, Operation};
 use crate::config::{Config, MainOptions, WindowParams};
 use crate::ecs::layout::LayoutStrip;
-use crate::ecs::{LayoutPosition, Position, SpawnWindowTrigger, StableRetileMarker, Unmanaged};
+use crate::ecs::{LayoutPosition, Position, RetileMarker, SpawnWindowTrigger, Unmanaged};
 use crate::events::Event;
 use crate::manager::{Origin, Size, Window};
 use crate::{assert_focused, assert_window_at, assert_window_size};
@@ -141,7 +141,9 @@ fn retiling_floating_window_centers_after_layout_updates() {
             let entity = find_window_entity(2, world);
             world
                 .entity_mut(entity)
-                .insert(StableRetileMarker)
+                .insert(RetileMarker {
+                    previous_center_x: TEST_WINDOW_WIDTH / 2,
+                })
                 .remove::<Unmanaged>();
         })
         .on_iteration(2, move |world| {
@@ -160,8 +162,8 @@ fn retiling_floating_window_centers_after_layout_updates() {
                 TEST_DISPLAY_WIDTH / 2 - layout_position.0.x - TEST_WINDOW_WIDTH / 2
             );
             assert!(
-                world.get::<StableRetileMarker>(entity).is_none(),
-                "stable retile marker should be consumed"
+                world.get::<RetileMarker>(entity).is_none(),
+                "retile marker should be consumed"
             );
         })
         .run(commands);
