@@ -713,7 +713,15 @@ type ResizedWindowQuery<'w, 's> = Query<
 pub(super) fn window_resized_update_frame(
     mut messages: MessageReader<Event>,
     mut windows: ResizedWindowQuery,
-    mut active_workspace: Single<(&LayoutStrip, &mut Position), With<ActiveWorkspaceMarker>>,
+    mut workspaces: Query<
+        (
+            Entity,
+            &mut LayoutStrip,
+            Has<ActiveWorkspaceMarker>,
+            &mut Position,
+        ),
+        With<LayoutStrip>,
+    >,
 ) {
     for event in messages.read() {
         let Event::WindowResized { window_id } = event else {
@@ -736,6 +744,11 @@ pub(super) fn window_resized_update_frame(
         }
 
         if unmanaged.is_some() || default_floating_subrole(&window) {
+            for (_, mut strip, _, _) in &mut workspaces {
+                if strip.contains(entity) {
+                    strip.remove(entity);
+                }
+            }
             if old_frame.min != new_frame.min {
                 position.0 = new_frame.min;
             }
@@ -743,18 +756,26 @@ pub(super) fn window_resized_update_frame(
         }
 
         // If the window was resized, shift LayoutStrip slightly to avoid moving right corner.
-        let (active_strip, ref mut strip_position) = *active_workspace;
-        if old_frame.min.x != new_frame.min.x {
-            let shift = (old_frame.size() - new_frame.size()).with_y(0);
-            // Search marke: reposition_entity - Updating position directly to reduce jitter.
-            strip_position.0.x += shift.x;
+        let mut above_entity = None;
+        for (_, active_strip, active, mut strip_position) in &mut workspaces {
+            if !active {
+                continue;
+            }
+
+            if old_frame.min.x != new_frame.min.x {
+                let shift = (old_frame.size() - new_frame.size()).with_y(0);
+                // Search marke: reposition_entity - Updating position directly to reduce jitter.
+                strip_position.0.x += shift.x;
+            }
+            above_entity = active_strip.above(entity);
+            break;
         }
 
         // When the user drags the top edge of a stacked window, we adjust the window above to
         // accomodate.
         let diff = old_frame.min.y - new_frame.min.y;
         if diff.abs() > 0
-            && let Some(above_entity) = active_strip.above(entity)
+            && let Some(above_entity) = above_entity
             && let Ok((_, _, _, mut above_bounds, above_unmanaged)) = windows.get_mut(above_entity)
             && above_unmanaged.is_none()
             && above_bounds.0.y - diff > 200

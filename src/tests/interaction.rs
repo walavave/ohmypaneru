@@ -6,7 +6,7 @@ use crate::ecs::layout::LayoutStrip;
 use crate::ecs::{LayoutPosition, Position, RetileMarker, SpawnWindowTrigger, Unmanaged};
 use crate::events::Event;
 use crate::manager::{Origin, Size, Window};
-use crate::{assert_focused, assert_window_at, assert_window_size};
+use crate::{assert_focused, assert_not_on_workspace, assert_window_at, assert_window_size};
 
 use super::*;
 
@@ -119,6 +119,62 @@ fn floating_window_left_edge_resize_does_not_move_tiled_windows() {
             assert_window_at!(world, 1, TEST_WINDOW_WIDTH, TEST_MENUBAR_HEIGHT);
             assert_window_at!(world, 0, 700, TEST_MENUBAR_HEIGHT);
             assert_window_size!(world, 0, 500, TEST_DISPLAY_HEIGHT - TEST_MENUBAR_HEIGHT);
+        })
+        .run(commands);
+}
+
+#[test]
+fn floating_window_resize_does_not_widen_stacked_tiled_window() {
+    let commands = vec![
+        Event::MenuOpened { window_id: 0 },
+        Event::MenuOpened { window_id: 0 },
+        Event::WindowResized { window_id: 2 },
+    ];
+
+    TestHarness::new()
+        .with_windows(3)
+        .on_iteration(0, move |world| {
+            let entity_1 = find_window_entity(1, world);
+            let entity_2 = find_window_entity(2, world);
+
+            let mut strips = world.query::<&mut LayoutStrip>();
+            let mut strip = strips.single_mut(world).expect("active strip should exist");
+            strip
+                .stack(entity_1)
+                .expect("stacking window should succeed");
+
+            world.entity_mut(entity_2).insert(Unmanaged::Floating);
+        })
+        .on_iteration(1, move |world| {
+            let entity_1 = find_window_entity(1, world);
+            let entity_2 = find_window_entity(2, world);
+
+            let mut strips = world.query::<&mut LayoutStrip>();
+            let mut strip = strips.single_mut(world).expect("active strip should exist");
+            strip.insert_at(0, entity_2);
+            strip
+                .stack(entity_1)
+                .expect("rebuilding stacked column should succeed");
+
+            let mut windows = world.query::<&mut Window>();
+            let mut window = windows
+                .iter_mut(world)
+                .find(|window| window.id() == 2)
+                .expect("window not found");
+            window.resize(Size::new(500, TEST_WINDOW_HEIGHT));
+        })
+        .on_iteration(2, move |world| {
+            let mut windows = world.query::<&Window>();
+            let window = windows
+                .iter(world)
+                .find(|window| window.id() == 1)
+                .expect("window not found");
+            assert_eq!(
+                window.frame().width(),
+                TEST_WINDOW_WIDTH,
+                "stacked tiled window width should not follow floating resize"
+            );
+            assert_not_on_workspace!(world, 2, TEST_WORKSPACE_ID);
         })
         .run(commands);
 }
