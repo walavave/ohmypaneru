@@ -193,7 +193,7 @@ impl PaneruState {
                             Some(SavedColumn::Tabs(saved_tabs))
                         }
                     }
-                    Column::Fullscren(entity) => SavedWindow::from_entity(*entity, windows, apps)
+                    Column::Fullscreen(entity) => SavedWindow::from_entity(*entity, windows, apps)
                         .map(SavedColumn::Fullscreen),
                 };
 
@@ -329,7 +329,7 @@ impl PaneruState {
 }
 
 impl PaneruQueryState {
-    #[allow(clippy::type_complexity)]
+    #[allow(clippy::type_complexity, clippy::too_many_lines)]
     pub fn extract(
         workspaces: &Query<(&ChildOf, &LayoutStrip, Has<ActiveWorkspaceMarker>)>,
         displays: &Query<(&Display, Entity, Has<ActiveDisplayMarker>)>,

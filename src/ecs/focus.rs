@@ -1,12 +1,14 @@
 use std::time::Duration;
 
 use bevy::app::{App, Plugin, PostUpdate};
+use bevy::ecs::component::Component;
 use bevy::ecs::entity::Entity;
 use bevy::ecs::lifecycle::{Add, Remove};
 use bevy::ecs::observer::On;
 use bevy::ecs::query::{Added, Has, With};
+use bevy::ecs::resource::Resource;
 use bevy::ecs::schedule::IntoScheduleConfigs as _;
-use bevy::ecs::system::{Commands, Populated, Query, Res, Single};
+use bevy::ecs::system::{Commands, Populated, Query, Res, ResMut, Single};
 use bevy::prelude::Event as BevyEvent;
 use bevy::time::common_conditions::on_timer;
 use tracing::{Level, debug, error, instrument, warn};
@@ -17,7 +19,7 @@ use crate::ecs::layout::LayoutStrip;
 use crate::ecs::params::{ActiveDisplay, GlobalState, Windows};
 use crate::ecs::{
     ActiveWorkspaceMarker, RetileMarker, SelectedVirtualMarker, SendMessageTrigger,
-    StrayFocusEvent, focus_entity, reposition_entity, reshuffle_around,
+    StrayFocusEvent, default_floating_subrole, focus_entity, reposition_entity, reshuffle_around,
 };
 use crate::events::Event;
 use crate::manager::{Application, Window, WindowManager};
@@ -27,6 +29,7 @@ pub struct FocusEventsPlugin;
 
 impl Plugin for FocusEventsPlugin {
     fn build(&self, app: &mut App) {
+        app.init_resource::<CachedTiledFocus>();
         app.add_systems(
             PostUpdate,
             (
@@ -52,15 +55,51 @@ pub(super) struct FocusWindow {
     pub raise: bool,
 }
 
+#[derive(Default, Resource)]
+struct CachedTiledFocus(Option<Entity>);
+
+#[derive(Component)]
+struct SuppressFocusView;
+
+fn cache_tiled_focus(entity: Entity, windows: &Windows, cache: &mut CachedTiledFocus) {
+    if is_tiled_focus_candidate(entity, windows) {
+        cache.0 = Some(entity);
+    }
+}
+
+fn cached_tiled_focus_entity(
+    windows: &Windows,
+    active_strip: &LayoutStrip,
+    cache: &mut CachedTiledFocus,
+) -> Option<Entity> {
+    let entity = cache.0?;
+    if active_strip.contains(entity) && is_tiled_focus_candidate(entity, windows) {
+        Some(entity)
+    } else {
+        cache.0 = None;
+        None
+    }
+}
+
+fn is_tiled_focus_candidate(entity: Entity, windows: &Windows) -> bool {
+    let Some((window, _, unmanaged)) = windows.get_managed(entity) else {
+        return false;
+    };
+    unmanaged.is_none() && !default_floating_subrole(window)
+}
+
 #[allow(clippy::needless_pass_by_value)]
 #[instrument(level = Level::DEBUG, skip_all, fields(trigger))]
 fn maintain_focus_singleton(
     trigger: On<Add, FocusedMarker>,
     windows: Query<(Entity, Has<FocusedMarker>), With<Window>>,
+    all_windows: Windows,
+    mut cached_tiled_focus: ResMut<CachedTiledFocus>,
     mut config: GlobalState,
     mut commands: Commands,
 ) {
     let focused_entity = trigger.event().entity;
+    cache_tiled_focus(focused_entity, &all_windows, &mut cached_tiled_focus);
 
     for (entity, focused) in windows {
         if focused
@@ -83,7 +122,7 @@ fn maintain_focus_singleton(
 #[allow(clippy::needless_pass_by_value)]
 #[instrument(level = Level::DEBUG, skip_all, fields(trigger))]
 fn autocenter_window_on_focus(
-    focused: Single<Entity, Added<FocusedMarker>>,
+    focused: Single<(Entity, Option<&SuppressFocusView>), Added<FocusedMarker>>,
     mouse_held: Query<&MouseHeldMarker>,
     windows: Windows,
     global_state: GlobalState,
@@ -91,7 +130,12 @@ fn autocenter_window_on_focus(
     config: Res<Config>,
     mut commands: Commands,
 ) {
-    let entity = *focused;
+    let (entity, suppress_focus_view) = *focused;
+
+    if suppress_focus_view.is_some() {
+        commands.entity(entity).try_remove::<SuppressFocusView>();
+        return;
+    }
 
     if global_state.skip_reshuffle() || global_state.initializing() || !mouse_held.is_empty() {
         return;
@@ -252,6 +296,7 @@ fn focus_window_trigger(trigger: On<FocusWindow>, windows: Windows, apps: Query<
 fn recover_lost_focus(
     windows: Windows,
     active_workspace: Query<&LayoutStrip, With<ActiveWorkspaceMarker>>,
+    mut cached_tiled_focus: ResMut<CachedTiledFocus>,
     mut commands: Commands,
 ) {
     if windows.focused().is_some() {
@@ -261,8 +306,15 @@ fn recover_lost_focus(
     if let Ok(strip) = active_workspace
         .single()
         .inspect_err(|err| error!("Unable to get current workspace: {err}"))
-        && let Some(entity) = strip.first().ok().and_then(|col| col.top())
     {
+        if let Some(entity) = cached_tiled_focus_entity(&windows, strip, &mut cached_tiled_focus) {
+            commands.entity(entity).try_insert(SuppressFocusView);
+            focus_entity(entity, true, &mut commands);
+            return;
+        }
+        let Some(entity) = strip.first().ok().and_then(|col| col.top()) else {
+            return;
+        };
         focus_entity(entity, false, &mut commands);
     }
 }

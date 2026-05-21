@@ -637,15 +637,9 @@ pub(super) fn window_managed_trigger(
 }
 
 fn retile_insertion_index(center_x: i32, strip: &LayoutStrip, windows: &Windows) -> usize {
-    strip
-        .all_columns()
-        .into_iter()
-        .enumerate()
-        .find_map(|(index, candidate)| {
-            let candidate_center = windows.moving_frame(candidate)?.center().x;
-            (center_x < candidate_center).then_some(index)
-        })
-        .unwrap_or_else(|| strip.len())
+    strip.insertion_index_by_screen_center(center_x, |entity| {
+        windows.moving_frame(entity).map(|frame| frame.center().x)
+    })
 }
 
 /// Handles the event when a window is destroyed. The windows itself is not removed from the layout
@@ -739,8 +733,7 @@ fn give_away_focus(
     }
     let display_center = viewport.center().x;
     let closest = active_strip
-        .all_columns()
-        .into_iter()
+        .column_tops()
         .filter(|&candidate| candidate != entity)
         .filter_map(|candidate| {
             let center = windows.moving_frame(candidate)?.center().x;
@@ -755,8 +748,7 @@ fn give_away_focus(
             // geometrically-known window would leave FocusedMarker unset and
             // silently break keybindings.
             active_strip
-                .all_columns()
-                .into_iter()
+                .column_tops()
                 .find(|&candidate| candidate != entity)
         });
 

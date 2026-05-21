@@ -1,8 +1,8 @@
 use accessibility_sys::{
-    AXUIElementCreateApplication, AXUIElementRef, AXValueCreate, AXValueGetValue,
+    AXUIElementCreateApplication, AXUIElementRef, AXValueCreate, AXValueGetValue, kAXDialogSubrole,
     kAXFloatingWindowSubrole, kAXPositionAttribute, kAXRaiseAction, kAXSizeAttribute,
-    kAXStandardWindowSubrole, kAXUnknownSubrole, kAXValueTypeCGPoint, kAXValueTypeCGSize,
-    kAXWindowRole,
+    kAXStandardWindowSubrole, kAXSystemDialogSubrole, kAXSystemFloatingWindowSubrole,
+    kAXUnknownSubrole, kAXValueTypeCGPoint, kAXValueTypeCGSize, kAXWindowRole,
 };
 use bevy::ecs::component::Component;
 use bevy::math::IRect;
@@ -183,7 +183,7 @@ impl WindowOS {
     }
 
     /// Checks if the window is a "real" window based on its role and subrole.
-    /// It considers standard and floating window subroles as real.
+    /// It considers standard windows and dialog/floating windows as real.
     ///
     /// # Returns
     ///
@@ -192,9 +192,23 @@ impl WindowOS {
         let role = self.role().ok();
         let subrole = self.subrole().ok();
 
-        subrole.as_deref() == Some(kAXStandardWindowSubrole)
-            || (role.as_deref() == Some(kAXWindowRole)
-                && subrole.as_deref() == Some(kAXFloatingWindowSubrole))
+        let Some(subrole) = subrole.as_deref() else {
+            return false;
+        };
+        if [kAXDialogSubrole, kAXSystemDialogSubrole].contains(&subrole)
+            && self.title().is_ok_and(|title| title.is_empty())
+        {
+            return false;
+        }
+        role.as_deref() == Some(kAXWindowRole)
+            && [
+                kAXStandardWindowSubrole,
+                kAXDialogSubrole,
+                kAXSystemDialogSubrole,
+                kAXFloatingWindowSubrole,
+                kAXSystemFloatingWindowSubrole,
+            ]
+            .contains(&subrole)
     }
 
     fn app_reference(&self) -> Option<CFRetained<AXUIWrapper>> {

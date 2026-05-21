@@ -79,6 +79,42 @@ impl StackItem {
             StackItem::Tabs(tabs) => tabs.clone(),
         }
     }
+
+    pub fn windows(&self) -> impl Iterator<Item = Entity> + '_ {
+        match self {
+            StackItem::Single(id) => std::slice::from_ref(id).iter().copied(),
+            StackItem::Tabs(tabs) => tabs.iter().copied(),
+        }
+    }
+}
+
+#[derive(Clone, Copy)]
+enum ColumnLayoutItem<'a> {
+    Single(Entity),
+    Stack(&'a StackItem),
+    Tabs(&'a [Entity]),
+}
+
+impl ColumnLayoutItem<'_> {
+    fn top(self) -> Option<Entity> {
+        match self {
+            ColumnLayoutItem::Single(entity) => Some(entity),
+            ColumnLayoutItem::Stack(item) => item.top(),
+            ColumnLayoutItem::Tabs(tabs) => tabs.first().copied(),
+        }
+    }
+
+    fn push_windows(self, frame: IRect, output: &mut Vec<(Entity, IRect)>) {
+        match self {
+            ColumnLayoutItem::Single(entity) => output.push((entity, frame)),
+            ColumnLayoutItem::Stack(item) => {
+                output.extend(item.windows().map(|entity| (entity, frame)));
+            }
+            ColumnLayoutItem::Tabs(tabs) => {
+                output.extend(tabs.iter().copied().map(|entity| (entity, frame)));
+            }
+        }
+    }
 }
 
 /// Represents a single panel within a `LayoutStrip`, which can either hold a single window, a stack of items, or a group of tabs.
@@ -90,7 +126,7 @@ pub enum Column {
     Stack(Vec<StackItem>),
     /// A panel containing a group of native tabs, with the active "Leader" at the front.
     Tabs(Vec<Entity>),
-    Fullscren(Entity),
+    Fullscreen(Entity),
 }
 
 impl Column {
@@ -99,7 +135,7 @@ impl Column {
     /// For a `Stack` or `Tabs`, it's the first window in the vector.
     pub fn top(&self) -> Option<Entity> {
         match self {
-            Column::Single(id) | Column::Fullscren(id) => Some(*id),
+            Column::Single(id) | Column::Fullscreen(id) => Some(*id),
             Column::Stack(stack) => stack.first().and_then(StackItem::top),
             Column::Tabs(tabs) => tabs.first().copied(),
         }
@@ -108,7 +144,7 @@ impl Column {
     /// Returns the entity at the given index, or the last entity if the index exceeds the size.
     pub fn at_or_last(&self, index: usize) -> Option<Entity> {
         match self {
-            Column::Single(id) | Column::Fullscren(id) => Some(*id),
+            Column::Single(id) | Column::Fullscreen(id) => Some(*id),
             Column::Stack(stack) => stack
                 .get(index)
                 .or_else(|| stack.last())
@@ -120,7 +156,7 @@ impl Column {
     /// Returns the position of an entity within this column (0 for Single/Tabs, index for Stack).
     pub fn position_of(&self, entity: Entity) -> Option<usize> {
         match self {
-            Column::Single(id) | Column::Fullscren(id) => (*id == entity).then_some(0),
+            Column::Single(id) | Column::Fullscreen(id) => (*id == entity).then_some(0),
             Column::Stack(stack) => stack.iter().position(|item| item.contains(entity)),
             Column::Tabs(tabs) => tabs.contains(&entity).then_some(0),
         }
@@ -130,7 +166,7 @@ impl Column {
     /// This is used to change the Leader of a Tab group.
     pub fn move_to_front(&mut self, entity: Entity) {
         match self {
-            Column::Single(_) | Column::Fullscren(_) => {}
+            Column::Single(_) | Column::Fullscreen(_) => {}
             Column::Stack(stack) => {
                 if let Some(StackItem::Tabs(tabs)) =
                     stack.iter_mut().find(|item| item.contains(entity))
@@ -168,7 +204,7 @@ impl LayoutStrip {
 
     pub fn fullscreen(id: WorkspaceId, entity: Entity) -> Self {
         let mut columns = VecDeque::new();
-        columns.push_back(Column::Fullscren(entity));
+        columns.push_back(Column::Fullscreen(entity));
         Self {
             id,
             virtual_index: 0,
@@ -190,7 +226,7 @@ impl LayoutStrip {
         self.columns
             .iter()
             .position(|column| match column {
-                Column::Single(id) | Column::Fullscren(id) => *id == entity,
+                Column::Single(id) | Column::Fullscreen(id) => *id == entity,
                 Column::Stack(stack) => stack.iter().any(|item| item.contains(entity)),
                 Column::Tabs(stack) => stack.contains(&entity),
             })
@@ -203,7 +239,7 @@ impl LayoutStrip {
     /// Returns `true` if the strip contains the given entity.
     pub fn contains(&self, entity: Entity) -> bool {
         self.columns.iter().any(|column| match column {
-            Column::Single(id) | Column::Fullscren(id) => *id == entity,
+            Column::Single(id) | Column::Fullscreen(id) => *id == entity,
             Column::Stack(stack) => stack.iter().any(|item| item.contains(entity)),
             Column::Tabs(stack) => stack.contains(&entity),
         })
@@ -242,7 +278,7 @@ impl LayoutStrip {
         let index = self.index_of(leader)?;
         let column = self.columns.remove(index).unwrap();
         match column {
-            Column::Single(id) | Column::Fullscren(id) => {
+            Column::Single(id) | Column::Fullscreen(id) => {
                 self.columns.insert(index, Column::Tabs(vec![id, follower]));
             }
             Column::Stack(mut items) => {
@@ -286,7 +322,7 @@ impl LayoutStrip {
 
         if let Some((column, index)) = removed {
             match column {
-                Column::Single(_) | Column::Fullscren(_) => {
+                Column::Single(_) | Column::Fullscreen(_) => {
                     // Already removed from self.columns.
                 }
                 Column::Stack(mut stack) => {
@@ -426,7 +462,7 @@ impl LayoutStrip {
 
         let column_to_stack = self.columns.remove(index).unwrap();
         let items_to_stack = match column_to_stack {
-            Column::Fullscren(_) => return Ok(()),
+            Column::Fullscreen(_) => return Ok(()),
             Column::Single(id) => vec![StackItem::Single(id)],
             Column::Tabs(tabs) => vec![StackItem::Tabs(tabs)],
             Column::Stack(items) => items,
@@ -434,7 +470,7 @@ impl LayoutStrip {
 
         let target_column = self.columns.remove(index - 1).unwrap();
         let new_column = match target_column {
-            Column::Fullscren(_) => return Ok(()),
+            Column::Fullscreen(_) => return Ok(()),
             Column::Single(id) => {
                 Column::Stack([vec![StackItem::Single(id)], items_to_stack].concat())
             }
@@ -507,7 +543,7 @@ impl LayoutStrip {
         self.columns
             .iter()
             .flat_map(|column| match column {
-                Column::Single(entity) | Column::Fullscren(entity) => vec![*entity],
+                Column::Single(entity) | Column::Fullscreen(entity) => vec![*entity],
                 Column::Stack(items) => items.iter().flat_map(StackItem::all_windows).collect(),
                 Column::Tabs(ids) => ids.clone(),
             })
@@ -518,8 +554,21 @@ impl LayoutStrip {
         self.columns.get_mut(index)
     }
 
-    pub fn all_columns(&self) -> Vec<Entity> {
-        self.columns.iter().filter_map(Column::top).collect()
+    pub fn column_tops(&self) -> impl Iterator<Item = Entity> + '_ {
+        self.columns.iter().filter_map(Column::top)
+    }
+
+    pub fn insertion_index_by_screen_center<F>(&self, center_x: i32, mut center_of: F) -> usize
+    where
+        F: FnMut(Entity) -> Option<i32>,
+    {
+        self.column_tops()
+            .enumerate()
+            .find_map(|(index, candidate)| {
+                let candidate_center = center_of(candidate)?;
+                (center_x < candidate_center).then_some(index)
+            })
+            .unwrap_or_else(|| self.len())
     }
 
     pub fn id(&self) -> WorkspaceId {
@@ -542,56 +591,37 @@ impl LayoutStrip {
         const MIN_WINDOW_HEIGHT: i32 = 200;
 
         self.column_positions(get_window_frame)
-            .filter_map(move |(column, position)| {
-                let items: Vec<StackItem> = match column {
-                    Column::Single(entity) | Column::Fullscren(entity) => {
-                        vec![StackItem::Single(*entity)]
-                    }
-                    Column::Stack(stack) => stack.clone(),
-                    Column::Tabs(tabs) => vec![StackItem::Tabs(tabs.clone())],
-                };
-
-                let current_heights = items
-                    .iter()
-                    .filter_map(|item| item.top().and_then(get_window_frame))
-                    .map(|frame| frame.height())
-                    .collect::<Vec<_>>();
-
-                let heights =
-                    binpack_heights(&current_heights, MIN_WINDOW_HEIGHT, layout_strip_height)?;
-
-                let column_width = items
-                    .first()
-                    .and_then(|item| item.top().and_then(get_window_frame))
-                    .map(|frame| frame.width())?;
-
-                let mut next_y = 0;
-                let frames = items
-                    .into_iter()
-                    .zip(heights)
-                    .filter_map(|(item, height)| {
-                        let entity = item.top()?;
-                        let mut frame = get_window_frame(entity)?;
-                        frame.min.x = position;
-                        frame.max.x = frame.min.x + column_width;
-
-                        frame.min.y = next_y;
-                        frame.max.y = frame.min.y + height;
-
-                        next_y = frame.max.y;
-
-                        // Return ALL windows in the item with the same frame
-                        let results = item
-                            .all_windows()
-                            .into_iter()
-                            .map(|e| (e, frame))
-                            .collect::<Vec<_>>();
-                        Some(results)
-                    })
-                    .flatten()
-                    .collect::<Vec<_>>();
-
-                Some(frames)
+            .filter_map(move |(column, position)| match column {
+                Column::Single(entity) | Column::Fullscreen(entity) => {
+                    let items = [ColumnLayoutItem::Single(*entity)].into_iter();
+                    relative_positions_for_items(
+                        items,
+                        position,
+                        layout_strip_height,
+                        MIN_WINDOW_HEIGHT,
+                        get_window_frame,
+                    )
+                }
+                Column::Stack(stack) => {
+                    let items = stack.iter().map(ColumnLayoutItem::Stack);
+                    relative_positions_for_items(
+                        items,
+                        position,
+                        layout_strip_height,
+                        MIN_WINDOW_HEIGHT,
+                        get_window_frame,
+                    )
+                }
+                Column::Tabs(tabs) => {
+                    let items = [ColumnLayoutItem::Tabs(tabs)].into_iter();
+                    relative_positions_for_items(
+                        items,
+                        position,
+                        layout_strip_height,
+                        MIN_WINDOW_HEIGHT,
+                        get_window_frame,
+                    )
+                }
             })
             .flatten()
     }
@@ -603,8 +633,7 @@ impl LayoutStrip {
     {
         let mut left_edge = 0;
 
-        self.all_columns()
-            .into_iter()
+        self.column_tops()
             .filter_map(|entity| {
                 let frame = get_window_frame(entity);
                 let column = self
@@ -624,7 +653,7 @@ impl LayoutStrip {
         let index = self.index_of(entity).ok()?;
         let column = self.get(index).ok()?;
         match column {
-            Column::Single(_) | Column::Tabs(_) | Column::Fullscren(_) => None,
+            Column::Single(_) | Column::Tabs(_) | Column::Fullscreen(_) => None,
             Column::Stack(items) => {
                 let pos = items.iter().position(|item| item.contains(entity))?;
                 (pos > 0).then(|| items[pos - 1].top()).flatten()
@@ -644,7 +673,7 @@ impl LayoutStrip {
                         false
                     }
                 }),
-                Column::Single(_) | Column::Fullscren(_) => false,
+                Column::Single(_) | Column::Fullscreen(_) => false,
             })
             .is_ok_and(|t| t)
     }
@@ -652,7 +681,7 @@ impl LayoutStrip {
     pub fn is_fullscreen(&self) -> bool {
         self.columns
             .front()
-            .is_some_and(|column| matches!(column, Column::Fullscren(_)))
+            .is_some_and(|column| matches!(column, Column::Fullscreen(_)))
     }
 }
 
@@ -666,6 +695,49 @@ impl std::fmt::Display for LayoutStrip {
             .collect::<Vec<_>>();
         write!(f, "[{}]", out.join(", "))
     }
+}
+
+fn relative_positions_for_items<'a, I, W>(
+    items: I,
+    column_x: i32,
+    layout_strip_height: i32,
+    min_window_height: i32,
+    get_window_frame: &W,
+) -> Option<Vec<(Entity, IRect)>>
+where
+    I: Iterator<Item = ColumnLayoutItem<'a>> + Clone,
+    W: Fn(Entity) -> Option<IRect>,
+{
+    let current_heights = items
+        .clone()
+        .filter_map(|item| item.top().and_then(get_window_frame))
+        .map(|frame| frame.height())
+        .collect::<Vec<_>>();
+
+    let heights = binpack_heights(&current_heights, min_window_height, layout_strip_height)?;
+
+    let column_width = items
+        .clone()
+        .next()
+        .and_then(|item| item.top().and_then(get_window_frame))
+        .map(|frame| frame.width())?;
+
+    let mut next_y = 0;
+    let mut frames = Vec::new();
+    for (item, height) in items.zip(heights) {
+        let entity = item.top()?;
+        let mut frame = get_window_frame(entity)?;
+        frame.min.x = column_x;
+        frame.max.x = frame.min.x + column_width;
+
+        frame.min.y = next_y;
+        frame.max.y = frame.min.y + height;
+        next_y = frame.max.y;
+
+        item.push_windows(frame, &mut frames);
+    }
+
+    Some(frames)
 }
 
 fn binpack_heights(heights: &[i32], min_height: i32, total_height: i32) -> Option<Vec<i32>> {
@@ -1024,7 +1096,7 @@ mod tests {
                 assert_eq!(stack[0], StackItem::Single(entities[0]));
                 assert_eq!(stack[1], StackItem::Single(entities[1]));
             }
-            Column::Single(_) | Column::Fullscren(_) | Column::Tabs(_) => {
+            Column::Single(_) | Column::Fullscreen(_) | Column::Tabs(_) => {
                 panic!("Expected a stack")
             }
         }

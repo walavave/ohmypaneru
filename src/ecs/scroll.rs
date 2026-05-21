@@ -242,8 +242,7 @@ fn apply_snap_force(
     }
 
     let target_offset = strip
-        .all_columns()
-        .into_iter()
+        .column_tops()
         .filter_map(|entity| {
             windows
                 .layout_position(entity)

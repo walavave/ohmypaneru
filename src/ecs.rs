@@ -1,6 +1,10 @@
 use std::sync::mpsc::Receiver;
 use std::time::{Duration, Instant};
 
+use accessibility_sys::{
+    kAXDialogSubrole, kAXFloatingWindowSubrole, kAXSystemDialogSubrole,
+    kAXSystemFloatingWindowSubrole,
+};
 use bevy::MinimalPlugins;
 use bevy::app::App as BevyApp;
 use bevy::app::{PostUpdate, PreUpdate, Startup};
@@ -475,6 +479,7 @@ pub fn setup_bevy_app(sender: EventSender, receiver: Receiver<Event>) -> Result<
 
 struct WindowProperties {
     pub params: Vec<WindowParams>,
+    pub default_floating: bool,
 }
 
 impl WindowProperties {
@@ -482,14 +487,18 @@ impl WindowProperties {
         let bundle_id = app.bundle_id().unwrap_or_default();
         let title = window.title().unwrap_or_default();
         let params = config.find_window_properties(&title, bundle_id);
-        Self { params }
+        let default_floating = default_floating_subrole(window);
+        Self {
+            params,
+            default_floating,
+        }
     }
 
     pub fn floating(&self) -> bool {
         self.params
             .iter()
             .find_map(|props| props.floating)
-            .unwrap_or(false)
+            .unwrap_or(self.default_floating)
     }
 
     pub fn insertion(&self) -> Option<usize> {
@@ -521,4 +530,16 @@ impl WindowProperties {
     pub fn width_ratio(&self) -> Option<f64> {
         self.params.iter().find_map(|props| props.width)
     }
+}
+
+pub(crate) fn default_floating_subrole(window: &Window) -> bool {
+    window.subrole().is_ok_and(|subrole| {
+        [
+            kAXDialogSubrole,
+            kAXSystemDialogSubrole,
+            kAXFloatingWindowSubrole,
+            kAXSystemFloatingWindowSubrole,
+        ]
+        .contains(&subrole.as_str())
+    })
 }

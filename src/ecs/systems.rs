@@ -28,7 +28,8 @@ use crate::ecs::params::{ActiveDisplay, Windows};
 use crate::ecs::{
     ActiveWorkspaceMarker, Bounds, BruteforceWindows, FlashMessage, Initializing,
     LocateDockTrigger, LowPowerMode, MissionControlActive, Position, RestoreWindowState, Scrolling,
-    SelectedVirtualMarker, Unmanaged, WidthRatio, WindowProperties, focus_entity,
+    SelectedVirtualMarker, Unmanaged, WidthRatio, WindowProperties, default_floating_subrole,
+    focus_entity,
 };
 use crate::events::Event;
 use crate::manager::{
@@ -734,7 +735,7 @@ pub(super) fn window_resized_update_frame(
             bounds.0 = new_frame.size();
         }
 
-        if unmanaged.is_some() {
+        if unmanaged.is_some() || default_floating_subrole(&window) {
             if old_frame.min != new_frame.min {
                 position.0 = new_frame.min;
             }

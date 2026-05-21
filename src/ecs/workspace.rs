@@ -850,8 +850,7 @@ fn show_active_workspace(
             if focus.is_none() {
                 let display_center = active_display.bounds().center().x;
                 let closest = strip
-                    .all_columns()
-                    .into_iter()
+                    .column_tops()
                     .filter_map(|candidate| {
                         let center = windows.moving_frame(candidate)?.center().x;
                         let distance = (center - display_center).abs();
