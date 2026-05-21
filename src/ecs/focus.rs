@@ -13,7 +13,7 @@ use bevy::prelude::Event as BevyEvent;
 use bevy::time::common_conditions::on_timer;
 use tracing::{Level, debug, error, instrument, warn};
 
-use super::{FocusedMarker, MouseHeldMarker, SystemTheme};
+use super::{FocusedMarker, MouseHeld, SystemTheme};
 use crate::config::Config;
 use crate::ecs::layout::LayoutStrip;
 use crate::ecs::params::{ActiveDisplay, GlobalState, Windows};
@@ -123,7 +123,7 @@ fn maintain_focus_singleton(
 #[instrument(level = Level::DEBUG, skip_all, fields(trigger))]
 fn autocenter_window_on_focus(
     focused: Single<(Entity, Option<&SuppressFocusView>), Added<FocusedMarker>>,
-    mouse_held: Query<&MouseHeldMarker>,
+    mouse_held: Res<MouseHeld>,
     windows: Windows,
     global_state: GlobalState,
     active_display: ActiveDisplay,
@@ -137,7 +137,7 @@ fn autocenter_window_on_focus(
         return;
     }
 
-    if global_state.skip_reshuffle() || global_state.initializing() || !mouse_held.is_empty() {
+    if global_state.skip_reshuffle() || global_state.initializing() || mouse_held.is_held() {
         return;
     }
     bring_window_into_focus_view(

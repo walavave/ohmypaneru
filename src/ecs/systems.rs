@@ -38,7 +38,7 @@ use crate::manager::{
 use crate::overlay::{FlashMessageManager, OverlayManager};
 use crate::platform::PlatformCallbacks;
 
-const ANIAMTE_SNAP_THRESHOLD: f32 = 5.0;
+const ANIMATE_SNAP_THRESHOLD: f32 = 5.0;
 
 /// Processes a single incoming `Event`. It dispatches various event types to the `WindowManager` or other internal handlers.
 /// This system reads `Event` messages and triggers appropriate Bevy events or modifies resources based on the event type.
@@ -583,7 +583,7 @@ pub(super) fn animate_entities(
 
             // Snap once we're within a pixel of the target (or after one effectively-
             // complete tick), so the marker is dropped promptly.
-            let finished = (target - lerped).length() <= ANIAMTE_SNAP_THRESHOLD;
+            let finished = (target - lerped).length() <= ANIMATE_SNAP_THRESHOLD;
             let new_pos = if finished {
                 *origin
             } else {
@@ -632,7 +632,7 @@ pub(super) fn animate_resize_entities(
             let current = bounds.0.as_vec2();
             let lerped = current.lerp(target, t);
 
-            let finished = (target - lerped).length() <= ANIAMTE_SNAP_THRESHOLD;
+            let finished = (target - lerped).length() <= ANIMATE_SNAP_THRESHOLD;
             let new_size = if finished {
                 *size
             } else {

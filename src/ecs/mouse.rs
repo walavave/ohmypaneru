@@ -3,11 +3,11 @@ use bevy::ecs::entity::Entity;
 use bevy::ecs::message::MessageReader;
 use bevy::ecs::query::With;
 use bevy::ecs::schedule::IntoScheduleConfigs as _;
-use bevy::ecs::system::{Commands, Local, Query, Res, Single};
+use bevy::ecs::system::{Commands, Local, Query, Res, ResMut, Single};
 use std::time::Duration;
 use tracing::{debug, trace, warn};
 
-use super::{MouseHeldMarker, Timeout};
+use super::MouseHeld;
 use crate::config::Config;
 use crate::ecs::layout::LayoutStrip;
 use crate::ecs::params::{GlobalState, Windows};
@@ -19,10 +19,13 @@ use crate::events::Event;
 use crate::manager::{Origin, WindowManager, origin_from};
 use crate::platform::WinID;
 
+const MOUSE_HELD_TIMEOUT: Duration = Duration::from_secs(60);
+
 pub struct MouseEventsPlugin;
 
 impl Plugin for MouseEventsPlugin {
     fn build(&self, app: &mut App) {
+        app.init_resource::<MouseHeld>();
         let mission_control_inactive = |mission_control: Option<Res<MissionControlActive>>| {
             mission_control.is_none_or(|active| !active.0)
         };
@@ -35,8 +38,10 @@ impl Plugin for MouseEventsPlugin {
                     mouse_resize_trigger,
                     mouse_down_trigger,
                 )
+                    .chain()
                     .run_if(mission_control_inactive),
-                mouse_up_trigger,
+                mouse_up_trigger.after(mouse_down_trigger),
+                mouse_held_timeout,
             ),
         );
     }
@@ -145,7 +150,7 @@ fn mouse_down_trigger(
     active_workspace: Query<(Entity, Option<&Scrolling>), With<ActiveWorkspaceMarker>>,
     window_manager: Res<WindowManager>,
     config: Res<Config>,
-    mouse_held: Query<Entity, With<MouseHeldMarker>>,
+    mut mouse_held: ResMut<MouseHeld>,
     mut commands: Commands,
 ) {
     for event in messages.read() {
@@ -169,18 +174,13 @@ fn mouse_down_trigger(
             }
         }
 
-        // Clean up any stale marker from a previous click.
-        for held in &mouse_held {
-            commands.entity(held).despawn();
-        }
-
         if config.window_hidden_ratio() >= 1.0 {
             // At max hidden ratio, never reshuffle on click.
         } else {
             // Defer reshuffle until mouse-up so the window doesn't shift
-            // mid-click. The Timeout auto-despawns if mouse-up is lost.
-            let timeout = Timeout::new(Duration::from_secs(5), None);
-            commands.spawn((MouseHeldMarker(entity), timeout));
+            // mid-click. This is a resource, not a spawned component, so a
+            // short down/up pair in the same frame still reveals reliably.
+            mouse_held.hold(entity);
         }
     }
 }
@@ -190,7 +190,7 @@ fn mouse_down_trigger(
 #[allow(clippy::needless_pass_by_value)]
 fn mouse_up_trigger(
     mut messages: MessageReader<Event>,
-    mouse_held: Query<(Entity, &MouseHeldMarker)>,
+    mut mouse_held: ResMut<MouseHeld>,
     mut commands: Commands,
 ) {
     for event in messages.read() {
@@ -198,11 +198,14 @@ fn mouse_up_trigger(
             continue;
         }
 
-        for (held_entity, marker) in &mouse_held {
-            reshuffle_around(marker.0, &mut commands);
-            commands.entity(held_entity).despawn();
+        if let Some(entity) = mouse_held.take() {
+            reshuffle_around(entity, &mut commands);
         }
     }
+}
+
+fn mouse_held_timeout(mut mouse_held: ResMut<MouseHeld>) {
+    mouse_held.clear_if_expired(MOUSE_HELD_TIMEOUT);
 }
 
 #[derive(Default)]

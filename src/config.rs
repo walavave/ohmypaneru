@@ -230,6 +230,17 @@ fn parse_resize_direction(direction: &str) -> Result<ResizeDirection> {
     })
 }
 
+fn parse_virtual_target<T>(
+    input: &str,
+    direction: impl FnOnce(Direction) -> T,
+    number: impl FnOnce(u32) -> T,
+) -> Result<T> {
+    input.parse::<u32>().map_or_else(
+        |_| parse_direction(input).map(direction),
+        |_| parse_virtual_workspace_number(input).map(number),
+    )
+}
+
 /// Parses a command argument vector into an `Operation` enum.
 ///
 /// # Arguments
@@ -262,43 +273,28 @@ fn parse_operation(argv: &[&str]) -> Result<Operation> {
         "nextdisplay" => Operation::ToNextDisplay(MoveFocus::Follow),
         "nextdisplaysend" => Operation::ToNextDisplay(MoveFocus::Stay),
         "snap" => Operation::Snap,
-        "virtual" => {
-            let target = argv.get(1).ok_or(err)?;
-            target.parse::<u32>().map_or_else(
-                |_| parse_direction(target).map(Operation::Virtual),
-                |_| parse_virtual_workspace_number(target).map(Operation::VirtualNumber),
-            )?
-        }
+        "virtual" => parse_virtual_target(
+            argv.get(1).ok_or(err)?,
+            Operation::Virtual,
+            Operation::VirtualNumber,
+        )?,
         "virtualnum" => {
             Operation::VirtualNumber(parse_virtual_workspace_number(argv.get(1).ok_or(err)?)?)
         }
-        "virtualmove" => {
-            let target = argv.get(1).ok_or(err)?;
-            target.parse::<u32>().map_or_else(
-                |_| {
-                    parse_direction(target)
-                        .map(|dir| Operation::VirtualMove(dir, MoveFocus::Follow))
-                },
-                |_| {
-                    parse_virtual_workspace_number(target)
-                        .map(|index| Operation::VirtualMoveNumber(index, MoveFocus::Follow))
-                },
-            )?
-        }
+        "virtualmove" => parse_virtual_target(
+            argv.get(1).ok_or(err)?,
+            |dir| Operation::VirtualMove(dir, MoveFocus::Follow),
+            |index| Operation::VirtualMoveNumber(index, MoveFocus::Follow),
+        )?,
         "virtualmovenum" => Operation::VirtualMoveNumber(
             parse_virtual_workspace_number(argv.get(1).ok_or(err)?)?,
             MoveFocus::Follow,
         ),
-        "virtualsend" => {
-            let target = argv.get(1).ok_or(err)?;
-            target.parse::<u32>().map_or_else(
-                |_| parse_direction(target).map(|dir| Operation::VirtualMove(dir, MoveFocus::Stay)),
-                |_| {
-                    parse_virtual_workspace_number(target)
-                        .map(|index| Operation::VirtualMoveNumber(index, MoveFocus::Stay))
-                },
-            )?
-        }
+        "virtualsend" => parse_virtual_target(
+            argv.get(1).ok_or(err)?,
+            |dir| Operation::VirtualMove(dir, MoveFocus::Stay),
+            |index| Operation::VirtualMoveNumber(index, MoveFocus::Stay),
+        )?,
         "virtualsendnum" => Operation::VirtualMoveNumber(
             parse_virtual_workspace_number(argv.get(1).ok_or(err)?)?,
             MoveFocus::Stay,
@@ -990,20 +986,15 @@ impl<'de> Deserialize<'de> for Keybinding {
         D: Deserializer<'de>,
     {
         let input = String::deserialize(deserializer)?;
-        let mut parts = input.split('-').map(str::trim).collect::<Vec<_>>();
-        let key = parts.pop();
+        let (modifiers, key) = split_keybinding(&input).map_err(de::Error::custom)?;
 
-        if parts.len() > 1 || key.is_none() {
-            return Err(de::Error::custom(format!("Too many dashes: {input:?}")));
-        }
-
-        let modifiers = match parts.pop() {
+        let modifiers = match modifiers {
             Some(modifiers) => parse_modifiers(modifiers).map_err(de::Error::custom)?,
             None => Modifiers::empty(),
         };
 
         Ok(Keybinding {
-            key: key.unwrap().to_string(),
+            key: key.to_string(),
             code: 0,
             modifiers,
             command: Command::Quit,
@@ -1110,23 +1101,30 @@ where
         .map_err(|e: Error| serde::de::Error::custom(e.to_string()))
 }
 
+fn split_keybinding(input: &str) -> Result<(Option<&str>, &str)> {
+    if let Some((modifiers, key)) = input.split_once('-') {
+        if key.contains('-') {
+            return Err(Error::InvalidConfig(format!(
+                "Too many dashes in keybinding: {input:?}"
+            )));
+        }
+        return Ok((Some(modifiers.trim()), key.trim()));
+    }
+    if input.is_empty() {
+        return Err(Error::InvalidConfig(format!(
+            "Empty keybinding string: {input:?}"
+        )));
+    }
+    Ok((None, input.trim()))
+}
+
 /// Resolves a keybinding string like `"ctrl+alt-h"` into a `(keycode, Modifiers)` pair.
 fn resolve_keybinding_str(input: &str, virtual_keys: &[(String, u8)]) -> Result<(u8, Modifiers)> {
-    let mut parts: Vec<&str> = input.split('-').map(str::trim).collect();
-    let key = parts
-        .pop()
-        .ok_or_else(|| Error::InvalidConfig("Empty keybinding string".to_string()))?;
-
-    let modifiers = match parts.pop() {
+    let (modifiers, key) = split_keybinding(input)?;
+    let modifiers = match modifiers {
         Some(mods) => parse_modifiers(mods)?,
         None => Modifiers::empty(),
     };
-
-    if !parts.is_empty() {
-        return Err(Error::InvalidConfig(format!(
-            "Too many dashes in keybinding: {input:?}"
-        )));
-    }
 
     let code = keycode_for_key_name(key, virtual_keys).ok_or_else(|| {
         Error::InvalidConfig(format!("Unknown key '{key}' in keybinding: {input:?}"))

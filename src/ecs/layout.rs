@@ -162,6 +162,29 @@ impl Column {
         }
     }
 
+    pub fn contains(&self, entity: Entity) -> bool {
+        match self {
+            Column::Single(id) | Column::Fullscreen(id) => *id == entity,
+            Column::Stack(stack) => stack.iter().any(|item| item.contains(entity)),
+            Column::Tabs(tabs) => tabs.contains(&entity),
+        }
+    }
+
+    pub fn all_windows(&self) -> Vec<Entity> {
+        match self {
+            Column::Single(entity) | Column::Fullscreen(entity) => vec![*entity],
+            Column::Stack(items) => items.iter().flat_map(StackItem::all_windows).collect(),
+            Column::Tabs(ids) => ids.clone(),
+        }
+    }
+
+    fn from_stack_item(item: StackItem) -> Self {
+        match item {
+            StackItem::Single(id) => Column::Single(id),
+            StackItem::Tabs(tabs) => Column::Tabs(tabs),
+        }
+    }
+
     /// Moves the specified entity to the front of the vector (index 0).
     /// This is used to change the Leader of a Tab group.
     pub fn move_to_front(&mut self, entity: Entity) {
@@ -225,11 +248,7 @@ impl LayoutStrip {
     pub fn index_of(&self, entity: Entity) -> Result<usize> {
         self.columns
             .iter()
-            .position(|column| match column {
-                Column::Single(id) | Column::Fullscreen(id) => *id == entity,
-                Column::Stack(stack) => stack.iter().any(|item| item.contains(entity)),
-                Column::Tabs(stack) => stack.contains(&entity),
-            })
+            .position(|column| column.contains(entity))
             .ok_or(Error::NotFound(format!(
                 "{}: can not find window {entity} in the current pane.",
                 function_name!()
@@ -238,11 +257,7 @@ impl LayoutStrip {
 
     /// Returns `true` if the strip contains the given entity.
     pub fn contains(&self, entity: Entity) -> bool {
-        self.columns.iter().any(|column| match column {
-            Column::Single(id) | Column::Fullscreen(id) => *id == entity,
-            Column::Stack(stack) => stack.iter().any(|item| item.contains(entity)),
-            Column::Tabs(stack) => stack.contains(&entity),
-        })
+        self.columns.iter().any(|column| column.contains(entity))
     }
 
     /// Inserts a window ID into the pane at a specified position.
@@ -341,14 +356,8 @@ impl LayoutStrip {
                     if stack.len() > 1 {
                         self.columns.insert(index, Column::Stack(stack));
                     } else if let Some(remaining_item) = stack.first() {
-                        match remaining_item {
-                            StackItem::Single(id) => {
-                                self.columns.insert(index, Column::Single(*id));
-                            }
-                            StackItem::Tabs(tabs) => {
-                                self.columns.insert(index, Column::Tabs(tabs.clone()));
-                            }
-                        }
+                        self.columns
+                            .insert(index, Column::from_stack_item(remaining_item.clone()));
                     }
                 }
                 Column::Tabs(mut tabs) => {
@@ -459,10 +468,15 @@ impl LayoutStrip {
             // Can not stack to the left if left most window already.
             return Ok(());
         }
+        if matches!(self.columns.get(index), Some(Column::Fullscreen(_)))
+            || matches!(self.columns.get(index - 1), Some(Column::Fullscreen(_)))
+        {
+            return Ok(());
+        }
 
         let column_to_stack = self.columns.remove(index).unwrap();
         let items_to_stack = match column_to_stack {
-            Column::Fullscreen(_) => return Ok(()),
+            Column::Fullscreen(_) => unreachable!("fullscreen columns are handled before removal"),
             Column::Single(id) => vec![StackItem::Single(id)],
             Column::Tabs(tabs) => vec![StackItem::Tabs(tabs)],
             Column::Stack(items) => items,
@@ -470,7 +484,7 @@ impl LayoutStrip {
 
         let target_column = self.columns.remove(index - 1).unwrap();
         let new_column = match target_column {
-            Column::Fullscreen(_) => return Ok(()),
+            Column::Fullscreen(_) => unreachable!("fullscreen columns are handled before removal"),
             Column::Single(id) => {
                 Column::Stack([vec![StackItem::Single(id)], items_to_stack].concat())
             }
@@ -507,19 +521,13 @@ impl LayoutStrip {
             let removed_item = items.remove(item_index);
 
             // Re-insert the unstacked item as a single/tabs panel
-            let unstacked_column = match removed_item {
-                StackItem::Single(id) => Column::Single(id),
-                StackItem::Tabs(tabs) => Column::Tabs(tabs),
-            };
-            self.columns.insert(index, unstacked_column);
+            self.columns
+                .insert(index, Column::from_stack_item(removed_item));
 
             // Re-insert the modified stack (if not empty) at the original position
             if !items.is_empty() {
                 let new_column = if items.len() == 1 {
-                    match items.remove(0) {
-                        StackItem::Single(id) => Column::Single(id),
-                        StackItem::Tabs(tabs) => Column::Tabs(tabs),
-                    }
+                    Column::from_stack_item(items.remove(0))
                 } else {
                     Column::Stack(items)
                 };
@@ -540,14 +548,7 @@ impl LayoutStrip {
     ///
     /// A `Vec<Entity>` containing all window IDs.
     pub fn all_windows(&self) -> Vec<Entity> {
-        self.columns
-            .iter()
-            .flat_map(|column| match column {
-                Column::Single(entity) | Column::Fullscreen(entity) => vec![*entity],
-                Column::Stack(items) => items.iter().flat_map(StackItem::all_windows).collect(),
-                Column::Tabs(ids) => ids.clone(),
-            })
-            .collect()
+        self.columns.iter().flat_map(Column::all_windows).collect()
     }
 
     pub fn get_column_mut(&mut self, index: usize) -> Option<&mut Column> {
@@ -1107,6 +1108,21 @@ mod tests {
         assert_eq!(strip.index_of(entities[1]).unwrap(), 0);
         assert_eq!(strip.index_of(entities[0]).unwrap(), 1);
         assert_eq!(strip.index_of(entities[2]).unwrap(), 2);
+    }
+
+    #[test]
+    fn stack_next_to_fullscreen_column_keeps_strip_intact() {
+        let (_world, mut strip, entities) = setup_world_and_strip();
+        strip.columns[0] = Column::Fullscreen(entities[0]);
+
+        strip.stack(entities[1]).unwrap();
+
+        assert_eq!(strip.len(), 3);
+        assert!(matches!(
+            strip.get(0).unwrap(),
+            Column::Fullscreen(entity) if entity == entities[0]
+        ));
+        assert_eq!(strip.index_of(entities[1]).unwrap(), 1);
     }
 
     #[test]

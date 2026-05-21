@@ -263,6 +263,10 @@ Stack items are:
 The strip stores logical order only. It does not directly move AppKit windows.
 Movement is derived through ECS layout systems.
 
+Ownership rule: keep column-local shape logic on `Column` and cross-column order
+mutation on `LayoutStrip`. `Fullscreen` columns are terminal and must be checked
+before removing columns during stack/unstack operations.
+
 ### Logical Layout Pipeline
 
 1. `LayoutStrip` changes when a window is appended, inserted, removed, swapped,
@@ -492,6 +496,10 @@ Examples:
 - `window_swap_east`
 - `window_virtualnum_3`
 - `quit`
+
+Parsing notes: virtual workspace commands share `parse_virtual_target`, and
+regular/passthrough shortcuts share `split_keybinding`, so new command or
+shortcut syntax should reuse those paths instead of branching separately.
 
 ## 12. Overlay and Menubar
 

@@ -355,10 +355,42 @@ pub struct SystemTheme {
 #[derive(Resource)]
 pub struct SkipReshuffle(pub bool);
 
-/// Component marking a deferred reshuffle while the mouse button is held down.
-/// Spawned with a `Timeout` so it auto-despawns if the mouse-up event is lost.
-#[derive(Component)]
-pub struct MouseHeldMarker(pub Entity);
+/// Resource marking a deferred reshuffle while the mouse button is held down.
+#[derive(Resource)]
+pub struct MouseHeld {
+    entity: Option<Entity>,
+    started_at: Instant,
+}
+
+impl Default for MouseHeld {
+    fn default() -> Self {
+        Self {
+            entity: None,
+            started_at: Instant::now(),
+        }
+    }
+}
+
+impl MouseHeld {
+    pub fn hold(&mut self, entity: Entity) {
+        self.entity = Some(entity);
+        self.started_at = Instant::now();
+    }
+
+    pub fn take(&mut self) -> Option<Entity> {
+        self.entity.take()
+    }
+
+    pub fn is_held(&self) -> bool {
+        self.entity.is_some()
+    }
+
+    pub fn clear_if_expired(&mut self, timeout: Duration) {
+        if self.entity.is_some() && self.started_at.elapsed() > timeout {
+            self.entity = None;
+        }
+    }
+}
 
 /// Resource indicating whether Mission Control is currently active.
 #[derive(PartialEq, Resource)]

@@ -15,8 +15,9 @@ use std::time::Duration;
 use tracing::{Level, debug, error, info, instrument, trace, warn};
 
 use super::{
-    ActiveDisplayMarker, BProcess, FocusedMarker, FreshMarker, MissionControlActive, RetileMarker,
-    RetryFrontSwitch, SpawnWindowTrigger, StrayFocusEvent, SystemTheme, Timeout, Unmanaged,
+    ActiveDisplayMarker, BProcess, FocusedMarker, FreshMarker, MissionControlActive, MouseHeld,
+    RetileMarker, RetryFrontSwitch, SpawnWindowTrigger, StrayFocusEvent, SystemTheme, Timeout,
+    Unmanaged,
 };
 use crate::config::{Config, WindowParams};
 use crate::ecs::layout::LayoutStrip;
@@ -173,13 +174,15 @@ pub(super) fn theme_change_trigger(
 /// * `focus_follows_mouse_id` - The resource to track focus follows mouse window ID.
 /// * `skip_reshuffle` - The resource to indicate if reshuffling should be skipped.
 /// * `commands` - Bevy commands to manage components and trigger events.
-#[allow(clippy::needless_pass_by_value)]
+#[allow(clippy::needless_pass_by_value, clippy::too_many_arguments)]
 #[instrument(level = Level::DEBUG, skip_all)]
 pub(super) fn window_focused_trigger(
     mut messages: MessageReader<Event>,
     applications: Query<&Application>,
     windows: Windows,
     mut active_display: ActiveDisplayMut,
+    mut global_state: GlobalState,
+    mouse_held: Res<MouseHeld>,
     config: Res<Config>,
     mut commands: Commands,
 ) {
@@ -209,6 +212,16 @@ pub(super) fn window_focused_trigger(
         if let Some((focused, _)) = windows.focused()
             && focused.id() == window_id
         {
+            // A click can arrive after focus-follows-mouse already marked the
+            // edge window focused and set skip_reshuffle. Treat the explicit
+            // focus notification as user intent to reveal the window.
+            if global_state.skip_reshuffle() {
+                global_state.set_skip_reshuffle(false);
+                global_state.set_ffm_flag(None);
+                if !mouse_held.is_held() {
+                    reshuffle_around(entity, &mut commands);
+                }
+            }
             continue;
         }
 
