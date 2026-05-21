@@ -71,7 +71,7 @@ pub(super) fn front_switched_trigger(
         let Some((BProcess(process), children)) =
             processes.iter().find(|process| &process.0.psn() == psn)
         else {
-            error!("Unable to find process with PSN {psn:?}");
+            debug!("Ignoring front switch for untracked PSN {psn:?}.");
             continue;
         };
 
@@ -79,43 +79,54 @@ pub(super) fn front_switched_trigger(
             warn!("Multiple apps registered to process '{}'.", process.name());
         }
         let Some(&app_entity) = children.first() else {
-            error!("No application for process '{}'.", process.name());
+            debug!(
+                "Ignoring front switch for process '{}' without application entity.",
+                process.name()
+            );
             continue;
         };
         let Some(app) = applications.get(app_entity).ok() else {
-            error!("No application for process '{}'.", process.name());
+            debug!(
+                "Ignoring front switch for process '{}' without live application component.",
+                process.name()
+            );
             continue;
         };
 
         debug!("front switching process: {}", process.name());
 
-        if let Ok(focused_id) = app.focused_window_id().inspect_err(|err| {
-            warn!("can not get current focus: {err}");
-        }) {
-            if let Some(point) = window_manager.cursor_position()
-                && window_manager
-                    .find_window_at_point(&point)
-                    .is_ok_and(|window_id| window_id != focused_id)
-            {
-                // Window got focus without mouse movement - probably with a Cmd-Tab or Dock click.
-                // If so, bring it into view.
-                config.set_skip_reshuffle(false);
-                config.set_ffm_flag(None);
+        match app.focused_window_id() {
+            Ok(focused_id) => {
+                if let Some(point) = window_manager.cursor_position()
+                    && window_manager
+                        .find_window_at_point(&point)
+                        .is_ok_and(|window_id| window_id != focused_id)
+                {
+                    // Window got focus without mouse movement - probably with a Cmd-Tab or Dock click.
+                    // If so, bring it into view.
+                    config.set_skip_reshuffle(false);
+                    config.set_ffm_flag(None);
+                }
+                commands.trigger(SendMessageTrigger(Event::WindowFocused {
+                    window_id: focused_id,
+                }));
             }
-            commands.trigger(SendMessageTrigger(Event::WindowFocused {
-                window_id: focused_id,
-            }));
-        } else {
-            // Transient AX error (e.g. kAXErrorCannotComplete during app transitions).
-            // Schedule a retry to query the focused window once the app is ready.
-            let timeout = Timeout::new(
-                Duration::from_secs(FRONT_SWITCH_RETRY_SEC),
-                Some(format!(
-                    "Front switch retry for '{}' timed out.",
+            Err(err) => {
+                debug!(
+                    "Front switch focus not ready for '{}': {err}",
                     process.name()
-                )),
-            );
-            commands.spawn((timeout, RetryFrontSwitch(app_entity)));
+                );
+                // Transient AX error (e.g. kAXErrorCannotComplete during app transitions).
+                // Schedule a retry to query the focused window once the app is ready.
+                let timeout = Timeout::new(
+                    Duration::from_secs(FRONT_SWITCH_RETRY_SEC),
+                    Some(format!(
+                        "Front switch retry for '{}' timed out.",
+                        process.name()
+                    )),
+                );
+                commands.spawn((timeout, RetryFrontSwitch(app_entity)));
+            }
         }
     }
 }
@@ -559,6 +570,7 @@ pub(super) fn window_minimized_trigger(
     windows: Windows,
     workspaces: Query<(&mut LayoutStrip, Has<ActiveWorkspaceMarker>)>,
     active_display: Single<&Display, With<ActiveDisplayMarker>>,
+    window_manager: Res<WindowManager>,
     mut config: GlobalState,
     mut commands: Commands,
 ) {
@@ -571,8 +583,19 @@ pub(super) fn window_minimized_trigger(
 
         for (mut strip, active) in workspaces {
             if active {
+                let floating_window_order = (!strip.contains(entity))
+                    .then(|| {
+                        window_manager
+                            .windows_in_workspace(strip.id())
+                            .inspect_err(|err| {
+                                debug!("unable to query active workspace window order: {err}");
+                            })
+                            .ok()
+                    })
+                    .flatten();
                 give_away_focus(
                     entity,
+                    floating_window_order.as_deref(),
                     &windows,
                     &strip,
                     &display_bounds,
@@ -671,6 +694,7 @@ pub(super) fn window_destroyed_trigger(
     mut messages: MessageReader<Event>,
     windows: Windows,
     active_display: ActiveDisplay,
+    window_manager: Res<WindowManager>,
     mut apps: Query<&mut Application>,
     mut config: GlobalState,
     mut commands: Commands,
@@ -699,24 +723,25 @@ pub(super) fn window_destroyed_trigger(
             windows.get_managed(entity),
             Some((_, _, Some(Unmanaged::Floating)))
         );
-        let has_other_floating = windows.iter().any(|(_, candidate)| {
-            candidate != entity
-                && matches!(
-                    windows.get_managed(candidate),
-                    Some((_, _, Some(Unmanaged::Floating)))
-                )
-        });
-
-        if !destroyed_floating || !has_other_floating {
-            give_away_focus(
-                entity,
-                &windows,
-                active_display.active_strip(),
-                &active_display.bounds(),
-                &mut config,
-                &mut commands,
-            );
-        }
+        let floating_window_order = if destroyed_floating {
+            window_manager
+                .windows_in_workspace(active_display.active_strip().id())
+                .inspect_err(|err| {
+                    debug!("unable to query active workspace window order: {err}");
+                })
+                .ok()
+        } else {
+            None
+        };
+        give_away_focus(
+            entity,
+            floating_window_order.as_deref(),
+            &windows,
+            active_display.active_strip(),
+            &active_display.bounds(),
+            &mut config,
+            &mut commands,
+        );
 
         // NOTE: If the entity had an Unmanaged marker, despawning it will cause it to be re-inserted
         // into the strip again. Therefore we do it just before despawning the entity itself, so it
@@ -733,6 +758,7 @@ pub(super) fn window_destroyed_trigger(
 /// Moves the focus away to a neighbour window.
 fn give_away_focus(
     entity: Entity,
+    floating_window_order: Option<&[WinID]>,
     windows: &Windows,
     active_strip: &LayoutStrip,
     viewport: &IRect,
@@ -744,8 +770,98 @@ fn give_away_focus(
         // Remaining tab gets the focus.
         return;
     }
+
+    let closest = floating_focus_candidate(
+        entity,
+        windows,
+        active_strip,
+        viewport,
+        floating_window_order,
+    )
+    .or_else(|| strip_focus_candidate(entity, windows, active_strip, viewport));
+
+    if let Some(neighbour) = closest
+        && windows.get(neighbour).is_some()
+    {
+        config.set_ffm_flag(None);
+        // Use focus_entity instead of triggering Event::WindowFocused: the
+        // OS has usually handed focus to a different app after the current
+        // window closed/hid, so window_focused_trigger's frontmost/focused
+        // guards would reject a fabricated event. focus_entity calls the
+        // AX API to raise the neighbour and inserts FocusedMarker directly.
+        focus_entity(neighbour, true, commands);
+    }
+}
+
+fn floating_focus_candidate(
+    entity: Entity,
+    windows: &Windows,
+    active_strip: &LayoutStrip,
+    viewport: &IRect,
+    floating_window_order: Option<&[WinID]>,
+) -> Option<Entity> {
+    let anchor = windows
+        .moving_frame(entity)
+        .map_or_else(|| viewport.center(), |frame| frame.center());
+
+    let topmost_floating = floating_window_order
+        .map(|order| topmost_floating_entities_in_order(order, windows, active_strip))?;
+
+    topmost_floating
+        .into_iter()
+        .filter(|candidate| *candidate != entity)
+        .filter_map(|candidate| {
+            let frame = windows
+                .moving_frame(candidate)
+                .or_else(|| windows.frame(candidate))?;
+            let center = frame.center();
+            let dx = i64::from(center.x - anchor.x);
+            let dy = i64::from(center.y - anchor.y);
+            let distance = dx * dx + dy * dy;
+            Some((candidate, !viewport.contains(center), distance))
+        })
+        .min_by_key(|(_, offscreen, distance)| (*offscreen, *distance))
+        .map(|(candidate, _, _)| candidate)
+}
+
+fn topmost_floating_entities_in_order(
+    ordered_window_ids: &[WinID],
+    windows: &Windows,
+    active_strip: &LayoutStrip,
+) -> Vec<Entity> {
+    let mut topmost_floating = Vec::new();
+
+    for &window_id in ordered_window_ids {
+        let Some((_, entity)) = windows.find(window_id) else {
+            continue;
+        };
+
+        if matches!(
+            windows.get_managed(entity),
+            Some((_, _, Some(Unmanaged::Floating)))
+        ) {
+            topmost_floating.push(entity);
+            continue;
+        }
+
+        if matches!(windows.get_managed(entity), Some((_, _, None)))
+            && active_strip.contains(entity)
+        {
+            break;
+        }
+    }
+
+    topmost_floating
+}
+
+fn strip_focus_candidate(
+    entity: Entity,
+    windows: &Windows,
+    active_strip: &LayoutStrip,
+    viewport: &IRect,
+) -> Option<Entity> {
     let display_center = viewport.center().x;
-    let closest = active_strip
+    active_strip
         .column_tops()
         .filter(|&candidate| candidate != entity)
         .filter_map(|candidate| {
@@ -763,19 +879,7 @@ fn give_away_focus(
             active_strip
                 .column_tops()
                 .find(|&candidate| candidate != entity)
-        });
-
-    if let Some(neighbour) = closest
-        && windows.get(neighbour).is_some()
-    {
-        config.set_ffm_flag(None);
-        // Use focus_entity instead of triggering Event::WindowFocused: the
-        // OS has usually handed focus to a different app after the current
-        // window closed/hid, so window_focused_trigger's frontmost/focused
-        // guards would reject a fabricated event. focus_entity calls the
-        // AX API to raise the neighbour and inserts FocusedMarker directly.
-        focus_entity(neighbour, true, commands);
-    }
+        })
 }
 
 /// Handles the event when a new window is created. It adds the window to the manager and sets focus.
@@ -1262,5 +1366,140 @@ pub(super) fn restore_window_state(
         };
         let hidden_origin = Position(bounds.max - 10);
         commands.spawn((strip, hidden_origin, previous, ChildOf(parent)));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use bevy::ecs::system::SystemState;
+
+    use super::*;
+    use crate::tests::{TestHarness, find_window_entity, verify_focused_window};
+
+    fn flush_internal_events(harness: &mut TestHarness) {
+        for _ in 0..5 {
+            harness.app.update();
+            while let Some(event) = harness.internal_queue.write().unwrap().pop() {
+                harness.app.world_mut().write_message::<Event>(event);
+            }
+        }
+    }
+
+    #[test]
+    fn give_away_focus_prefers_other_floating_window() {
+        let mut harness = TestHarness::new().with_windows(3);
+        harness.run(vec![Event::MenuOpened { window_id: 0 }]);
+
+        {
+            let world = harness.app.world_mut();
+            let first_floating = find_window_entity(1, world);
+            let focused_floating = find_window_entity(2, world);
+
+            world.entity_mut(first_floating).insert(Unmanaged::Floating);
+            world
+                .entity_mut(focused_floating)
+                .insert(Unmanaged::Floating);
+            world.entity_mut(focused_floating).insert(FocusedMarker);
+        }
+        flush_internal_events(&mut harness);
+
+        {
+            let world = harness.app.world_mut();
+            let focused_floating = find_window_entity(2, world);
+            let mut system_state: SystemState<(Windows, ActiveDisplay, GlobalState, Commands)> =
+                SystemState::new(world);
+            let (windows, active_display, mut config, mut commands) = system_state.get_mut(world);
+
+            give_away_focus(
+                focused_floating,
+                Some(&[2, 1, 0]),
+                &windows,
+                active_display.active_strip(),
+                &active_display.bounds(),
+                &mut config,
+                &mut commands,
+            );
+            system_state.apply(world);
+        }
+        flush_internal_events(&mut harness);
+
+        verify_focused_window(1, harness.app.world_mut());
+    }
+
+    #[test]
+    fn give_away_focus_does_not_raise_floating_window_below_tiled_layer() {
+        let mut harness = TestHarness::new().with_windows(3);
+        harness.run(vec![Event::MenuOpened { window_id: 0 }]);
+
+        {
+            let world = harness.app.world_mut();
+            let lower_floating = find_window_entity(1, world);
+            let focused_floating = find_window_entity(2, world);
+
+            world.entity_mut(lower_floating).insert(Unmanaged::Floating);
+            world
+                .entity_mut(focused_floating)
+                .insert(Unmanaged::Floating);
+            world.entity_mut(focused_floating).insert(FocusedMarker);
+        }
+        flush_internal_events(&mut harness);
+
+        {
+            let world = harness.app.world_mut();
+            let focused_floating = find_window_entity(2, world);
+            let mut system_state: SystemState<(Windows, ActiveDisplay, GlobalState, Commands)> =
+                SystemState::new(world);
+            let (windows, active_display, mut config, mut commands) = system_state.get_mut(world);
+
+            give_away_focus(
+                focused_floating,
+                Some(&[2, 0, 1]),
+                &windows,
+                active_display.active_strip(),
+                &active_display.bounds(),
+                &mut config,
+                &mut commands,
+            );
+            system_state.apply(world);
+        }
+        flush_internal_events(&mut harness);
+
+        verify_focused_window(0, harness.app.world_mut());
+    }
+
+    #[test]
+    fn front_switch_without_focused_window_schedules_retry() {
+        let mut harness = TestHarness::new().with_windows(0);
+        let psn = {
+            let world = harness.app.world_mut();
+            let mut apps = world.query::<&Application>();
+            apps.single(world).expect("application not found").psn()
+        };
+
+        harness
+            .app
+            .world_mut()
+            .write_message::<Event>(Event::ApplicationFrontSwitched { psn });
+        harness.app.update();
+
+        let world = harness.app.world_mut();
+        let mut retries = world.query::<&RetryFrontSwitch>();
+        assert_eq!(retries.iter(world).count(), 1, "expected one retry entity");
+    }
+
+    #[test]
+    fn front_switch_for_untracked_psn_is_ignored() {
+        let mut harness = TestHarness::new().with_windows(0);
+        let psn = crate::platform::ProcessSerialNumber { high: 7, low: 11 };
+
+        harness
+            .app
+            .world_mut()
+            .write_message::<Event>(Event::ApplicationFrontSwitched { psn });
+        harness.app.update();
+
+        let world = harness.app.world_mut();
+        let mut retries = world.query::<&RetryFrontSwitch>();
+        assert_eq!(retries.iter(world).count(), 0, "unexpected retry entity");
     }
 }
